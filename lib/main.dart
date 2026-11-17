@@ -28,9 +28,11 @@ int? parseInt(String s) =>
 double? parseDouble(String s) =>
     double.tryParse(normDigits(s).replaceAll(',', '.').replaceAll(' ', ''));
 
+// نستعمل مسافة غير منقسمة (NBSP) كفاصل آلاف: في النص العربي (RTL) المسافة العادية
+// تجعل مجموعات الأرقام تنعكس (514 943 تظهر 943 514)، أما NBSP فتبقي الرقم متصلاً.
 String fmt(int n) => n
     .toString()
-    .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ' ');
+    .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '\u00A0');
 
 String fmtDate(DateTime d) =>
     '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
