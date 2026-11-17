@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'notifications.dart';
+
 // ====================== أدوات مساعدة ======================
 
 String normDigits(String s) {
@@ -315,6 +317,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = await Store.load();
   runApp(CarApp(store: store));
+  // التنبيهات تبدأ بعد عرض التطبيق (طلب الإذن لا يؤخر الفتح)
+  Notifier.init().then((_) {
+    Notifier.sync(store);
+    store.addListener(() => Notifier.sync(store));
+  });
 }
 
 class CarApp extends StatelessWidget {
@@ -358,6 +365,21 @@ class _HomePageState extends State<HomePage> {
         return Scaffold(
           appBar: AppBar(
             title: Text(tab == 0 ? 'صيانة سيارتي' : 'سجل الصيانة'),
+            actions: [
+              IconButton(
+                tooltip: 'تجربة التنبيه',
+                icon: const Icon(Icons.notifications_active_outlined),
+                onPressed: () async {
+                  final ok = await Notifier.test();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(ok
+                        ? 'أُرسل إشعار تجريبي'
+                        : 'التنبيهات غير مفعّلة: فعّلها من إعدادات الهاتف للتطبيق'),
+                  ));
+                },
+              ),
+            ],
           ),
           body: tab == 0 ? _itemsTab(context) : _historyTab(context),
           floatingActionButton: tab == 0
