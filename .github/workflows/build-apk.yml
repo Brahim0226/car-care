@@ -27,6 +27,7 @@ jobs:
           flutter create --platforms=android --org com.example.carmaintenance --project-name car_maintenance .
           rm -rf test
           sed -i 's/android:label="[^"]*"/android:label="صيانة سيارتي"/' android/app/src/main/AndroidManifest.xml
+          cp release.keystore android/app/release.keystore
           python3 tools/patch_android.py .
 
       - run: flutter pub get

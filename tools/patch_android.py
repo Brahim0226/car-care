@@ -11,6 +11,47 @@ import sys
 DESUGAR = "com.android.tools:desugar_jdk_libs:2.1.4"
 
 
+STORE_PASS = "carcare2026"
+KEY_ALIAS = "carcare"
+
+SIGN_KTS = """    signingConfigs {
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "%s"
+            keyAlias = "%s"
+            keyPassword = "%s"
+        }
+    }
+""" % (STORE_PASS, KEY_ALIAS, STORE_PASS)
+
+SIGN_GROOVY = """    signingConfigs {
+        release {
+            storeFile file("release.keystore")
+            storePassword "%s"
+            keyAlias "%s"
+            keyPassword "%s"
+        }
+    }
+""" % (STORE_PASS, KEY_ALIAS, STORE_PASS)
+
+
+def add_signing(src, is_kts):
+    """توقيع ثابت (نفس المفتاح في كل بناء) كي يُثبَّت التحديث فوق النسخة القديمة."""
+    if "release.keystore" in src:
+        return src
+    block = SIGN_KTS if is_kts else SIGN_GROOVY
+    src, n = re.subn(r"(\n[ \t]*buildTypes\s*\{)", "\n" + block.rstrip("\n") + r"\1", src, count=1)
+    if n != 1:
+        sys.exit("لم أجد buildTypes لإضافة التوقيع")
+    if is_kts:
+        src, n = re.subn(r'signingConfigs\.getByName\("debug"\)', 'signingConfigs.getByName("release")', src)
+    else:
+        src, n = re.subn(r"signingConfigs\.debug", "signingConfigs.release", src)
+    if n < 1:
+        sys.exit("لم أجد سطر signingConfig الافتراضي لاستبداله")
+    return src
+
+
 def patch_gradle(app_dir):
     kts = os.path.join(app_dir, "build.gradle.kts")
     groovy = os.path.join(app_dir, "build.gradle")
@@ -50,6 +91,8 @@ def patch_gradle(app_dir):
         )
     else:
         new_src += "\ndependencies {\n    %s\n}\n" % dep
+
+    new_src = add_signing(new_src, is_kts)
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(new_src)

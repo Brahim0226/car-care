@@ -83,26 +83,30 @@ class Notifier {
 
     final now = DateTime.now();
     var id = 100;
-    for (final it in store.items) {
-      final last = store.lastService(it.id);
-      if (last == null || it.intervalMonths <= 0) continue;
-      final due = DateTime(last.date.year,
-          last.date.month + it.intervalMonths, last.date.day, 9);
-      final before = due.subtract(const Duration(days: 7));
-      await _schedule(
-        id++,
-        'اقترب موعد: ${it.name}',
-        'باقي أسبوع على موعد الصيانة (${fmtDate(due)})',
-        before,
-        now,
-      );
-      await _schedule(
-        id++,
-        'حان موعد: ${it.name}',
-        'موعد الصيانة اليوم (${fmtDate(due)})',
-        due,
-        now,
-      );
+    final multi = store.cars.length > 1;
+    for (final car in store.cars) {
+      final tag = multi ? ' • ${car.name}' : '';
+      for (final it in car.items) {
+        final last = car.lastService(it.id);
+        if (last == null || it.intervalMonths <= 0) continue;
+        final due = DateTime(last.date.year,
+            last.date.month + it.intervalMonths, last.date.day, 9);
+        final before = due.subtract(const Duration(days: 7));
+        await _schedule(
+          id++,
+          'اقترب موعد: ${it.name}$tag',
+          'باقي أسبوع على موعد الصيانة (${fmtDate(due)})',
+          before,
+          now,
+        );
+        await _schedule(
+          id++,
+          'حان موعد: ${it.name}$tag',
+          'موعد الصيانة اليوم (${fmtDate(due)})',
+          due,
+          now,
+        );
+      }
     }
 
     await _checkKm(store);
@@ -135,26 +139,31 @@ class Notifier {
     } catch (_) {}
 
     final next = <String, dynamic>{};
+    final multi = store.cars.length > 1;
     var n = 0;
-    for (final it in store.items) {
-      if (it.intervalKm <= 0) continue;
-      final last = store.lastService(it.id);
-      if (last == null) continue;
-      final rem = last.km + it.intervalKm - store.currentKm;
-      final lvl = rem < 0 ? 2 : (rem <= it.intervalKm ~/ 10 ? 1 : 0);
-      if (lvl == 0) continue; // رجع عادي: نصفّر التتبع لهذا البند
-      final prev = (shown[it.id] as num?)?.toInt() ?? 0;
-      next[it.id] = lvl > prev ? lvl : prev;
-      if (lvl > prev) {
-        final title = lvl == 2
-            ? 'تجاوزت موعد: ${it.name}'
-            : 'اقترب موعد: ${it.name}';
-        final body = lvl == 2
-            ? 'تجاوزت ${fmt(-rem)} كم، يُفضَّل إجراء الصيانة قريباً'
-            : 'باقي ${fmt(rem)} كم على الصيانة';
-        await _plugin.show(5000 + n, title, body, _details);
+    for (final car in store.cars) {
+      final tag = multi ? ' • ${car.name}' : '';
+      for (final it in car.items) {
+        if (it.intervalKm <= 0) continue;
+        final last = car.lastService(it.id);
+        if (last == null) continue;
+        final rem = last.km + it.intervalKm - car.km;
+        final lvl = rem < 0 ? 2 : (rem <= it.intervalKm ~/ 10 ? 1 : 0);
+        if (lvl == 0) continue; // رجع عادي: نصفّر التتبع لهذا البند
+        final key = '${car.id}:${it.id}';
+        final prev = (shown[key] as num?)?.toInt() ?? 0;
+        next[key] = lvl > prev ? lvl : prev;
+        if (lvl > prev) {
+          final title = lvl == 2
+              ? 'تجاوزت موعد: ${it.name}$tag'
+              : 'اقترب موعد: ${it.name}$tag';
+          final body = lvl == 2
+              ? 'تجاوزت ${fmt(-rem)} كم، يُفضَّل إجراء الصيانة قريباً'
+              : 'باقي ${fmt(rem)} كم على الصيانة';
+          await _plugin.show(5000 + n, title, body, _details);
+        }
+        n++;
       }
-      n++;
     }
     await store.prefs.setString('kmNotified', jsonEncode(next));
   }

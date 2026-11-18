@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'notifications.dart';
+import 'report.dart';
 
 // ====================== أدوات مساعدة ======================
 
@@ -26,18 +28,21 @@ int? parseInt(String s) =>
     int.tryParse(normDigits(s).replaceAll(RegExp(r'[\s,]'), ''));
 
 double? parseDouble(String s) =>
-    double.tryParse(normDigits(s).replaceAll(',', '.').replaceAll(' ', ''));
+    double.tryParse(normDigits(s).replaceAll(',', '.').replaceAll(RegExp(r'\s'), ''));
 
 // نستعمل مسافة غير منقسمة (NBSP) كفاصل آلاف: في النص العربي (RTL) المسافة العادية
 // تجعل مجموعات الأرقام تنعكس (514 943 تظهر 943 514)، أما NBSP فتبقي الرقم متصلاً.
 String fmt(int n) => n
     .toString()
-    .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '\u00A0');
+    .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ' ');
 
 String fmtDate(DateTime d) =>
     '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
 
 String fmtMoney(double v) => '${fmt(v.round())} دج';
+
+String numText(double v) =>
+    v == v.roundToDouble() ? v.round().toString() : v.toString();
 
 Future<bool> confirm(BuildContext context, String msg) async {
   final r = await showDialog<bool>(
@@ -178,86 +183,46 @@ List<Item> defaultItems() => [
       Item(id: 'battery', name: 'البطارية', intervalKm: 0, intervalMonths: 36),
     ];
 
-// ====================== التخزين والمنطق ======================
+/// سيارة: لها بنودها وسجل صيانتها وعدادها وسعر شرائها (اختياري)
+class Car {
+  final String id;
+  String name;
+  int km;
+  double? purchasePrice;
+  List<Item> items;
+  List<Service> services;
 
-class Store extends ChangeNotifier {
-  final SharedPreferences prefs;
-  String carName = 'سيارتي';
-  int currentKm = 0;
-  List<Item> items = [];
-  List<Service> services = [];
+  Car({
+    required this.id,
+    required this.name,
+    this.km = 0,
+    this.purchasePrice,
+    List<Item>? items,
+    List<Service>? services,
+  })  : items = items ?? defaultItems(),
+        services = services ?? [];
 
-  Store(this.prefs);
-
-  static Future<Store> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final s = Store(prefs);
-    final raw = prefs.getString('data');
-    if (raw == null) {
-      s.items = defaultItems();
-    } else {
-      try {
-        final j = jsonDecode(raw) as Map<String, dynamic>;
-        s.carName = j['carName'] as String? ?? s.carName;
-        s.currentKm = (j['currentKm'] as num?)?.toInt() ?? 0;
-        s.items = (j['items'] as List)
-            .map((e) => Item.fromJson(e as Map<String, dynamic>))
-            .toList();
-        s.services = (j['services'] as List)
-            .map((e) => Service.fromJson(e as Map<String, dynamic>))
-            .toList();
-      } catch (_) {
-        s.items = defaultItems();
-        s.services = [];
-      }
-    }
-    return s;
-  }
-
-  void _save() {
-    prefs.setString(
-      'data',
-      jsonEncode({
-        'carName': carName,
-        'currentKm': currentKm,
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'km': km,
+        'purchasePrice': purchasePrice,
         'items': items.map((e) => e.toJson()).toList(),
         'services': services.map((e) => e.toJson()).toList(),
-      }),
-    );
-    notifyListeners();
-  }
+      };
 
-  void setCar(String name, int km) {
-    carName = name;
-    currentKm = km;
-    _save();
-  }
-
-  void addItem(Item i) {
-    items.add(i);
-    _save();
-  }
-
-  void updateItem() => _save();
-
-  void deleteItem(String id) {
-    items.removeWhere((e) => e.id == id);
-    services.removeWhere((s) => s.itemId == id);
-    _save();
-  }
-
-  void addService(Service s) {
-    services.add(s);
-    if (s.km > currentKm) currentKm = s.km;
-    _save();
-  }
-
-  void deleteService(Service s) {
-    services.remove(s);
-    _save();
-  }
-
-  double get totalCost => services.fold<double>(0, (a, s) => a + s.cost);
+  factory Car.fromJson(Map<String, dynamic> j) => Car(
+        id: j['id'] as String,
+        name: j['name'] as String? ?? 'سيارتي',
+        km: (j['km'] as num?)?.toInt() ?? 0,
+        purchasePrice: (j['purchasePrice'] as num?)?.toDouble(),
+        items: ((j['items'] as List?) ?? [])
+            .map((e) => Item.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        services: ((j['services'] as List?) ?? [])
+            .map((e) => Service.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
 
   Item? itemById(String id) {
     for (final i in items) {
@@ -279,6 +244,11 @@ class Store extends ChangeNotifier {
     return best;
   }
 
+  double get maintenanceCost => services.fold<double>(0, (a, s) => a + s.cost);
+
+  /// ثمن الشراء (إن وُجد) + مصاريف الصيانة
+  double get totalCost => (purchasePrice ?? 0) + maintenanceCost;
+
   Status statusOf(Item it) {
     final last = lastService(it.id);
     if (last == null) {
@@ -287,7 +257,7 @@ class Store extends ChangeNotifier {
     int? remKm;
     int? remDays;
     if (it.intervalKm > 0) {
-      remKm = last.km + it.intervalKm - currentKm;
+      remKm = last.km + it.intervalKm - km;
     }
     if (it.intervalMonths > 0) {
       final next = DateTime(
@@ -310,6 +280,158 @@ class Store extends ChangeNotifier {
         (remDays != null && remDays <= 30);
     final level = overdue ? Level.overdue : (soon ? Level.soon : Level.ok);
     return Status(level, parts.join(' • '));
+  }
+}
+
+// ====================== التخزين والمنطق ======================
+
+class Store extends ChangeNotifier {
+  final SharedPreferences prefs;
+  List<Car> cars = [];
+  String currentId = '';
+
+  Store(this.prefs);
+
+  static String newId() => DateTime.now().microsecondsSinceEpoch.toString();
+
+  static Future<Store> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final s = Store(prefs);
+    final raw = prefs.getString('data');
+    if (raw != null) {
+      try {
+        s._parse(jsonDecode(raw) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    if (s.cars.isEmpty) {
+      s.cars = [Car(id: newId(), name: 'سيارتي')];
+    }
+    if (!s.cars.any((c) => c.id == s.currentId)) {
+      s.currentId = s.cars.first.id;
+    }
+    return s;
+  }
+
+  void _parse(Map<String, dynamic> j) {
+    if (j['cars'] is List) {
+      cars = (j['cars'] as List)
+          .map((e) => Car.fromJson(e as Map<String, dynamic>))
+          .toList();
+      currentId = j['currentId'] as String? ?? '';
+    } else {
+      // بيانات النسخة القديمة (سيارة واحدة): نحوّلها تلقائياً
+      final old = Car(
+        id: newId(),
+        name: j['carName'] as String? ?? 'سيارتي',
+        km: (j['currentKm'] as num?)?.toInt() ?? 0,
+        items: ((j['items'] as List?) ?? [])
+            .map((e) => Item.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        services: ((j['services'] as List?) ?? [])
+            .map((e) => Service.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+      cars = [old];
+      currentId = old.id;
+    }
+  }
+
+  Map<String, dynamic> _toJson() => {
+        'cars': cars.map((c) => c.toJson()).toList(),
+        'currentId': currentId,
+      };
+
+  void _save() {
+    prefs.setString('data', jsonEncode(_toJson()));
+    notifyListeners();
+  }
+
+  String exportJson() => jsonEncode(_toJson());
+
+  bool importJson(String raw) {
+    final oldCars = cars;
+    final oldId = currentId;
+    try {
+      _parse(jsonDecode(raw.trim()) as Map<String, dynamic>);
+      if (cars.isEmpty) throw const FormatException('empty');
+      if (!cars.any((c) => c.id == currentId)) currentId = cars.first.id;
+      _save();
+      return true;
+    } catch (_) {
+      cars = oldCars;
+      currentId = oldId;
+      return false;
+    }
+  }
+
+  // ---- السيارة الحالية ----
+  Car get car {
+    for (final c in cars) {
+      if (c.id == currentId) return c;
+    }
+    return cars.first;
+  }
+
+  String get carName => car.name;
+  int get currentKm => car.km;
+  List<Item> get items => car.items;
+  List<Service> get services => car.services;
+  Item? itemById(String id) => car.itemById(id);
+  Service? lastService(String id) => car.lastService(id);
+  Status statusOf(Item it) => car.statusOf(it);
+
+  double get grandTotal => cars.fold<double>(0, (a, c) => a + c.totalCost);
+
+  void selectCar(String id) {
+    currentId = id;
+    _save();
+  }
+
+  Car addCar(String name, int km, double? price) {
+    final c = Car(id: newId(), name: name, km: km, purchasePrice: price);
+    cars.add(c);
+    currentId = c.id;
+    _save();
+    return c;
+  }
+
+  void updateCar(Car c, String name, int km, double? price) {
+    c.name = name;
+    c.km = km;
+    c.purchasePrice = price;
+    _save();
+  }
+
+  void deleteCar(Car c) {
+    if (cars.length <= 1) return;
+    cars.remove(c);
+    if (currentId == c.id) currentId = cars.first.id;
+    _save();
+  }
+
+  // ---- بنود وصيانات السيارة الحالية ----
+  void addItem(Item i) {
+    car.items.add(i);
+    _save();
+  }
+
+  void updateItem() => _save();
+
+  void deleteItem(String id) {
+    car.items.removeWhere((e) => e.id == id);
+    car.services.removeWhere((s) => s.itemId == id);
+    _save();
+  }
+
+  void addService(Service s) {
+    car.services.add(s);
+    if (s.km > car.km) car.km = s.km;
+    _save();
+  }
+
+  void deleteService(Service s) {
+    car.services.remove(s);
+    _save();
   }
 }
 
@@ -347,6 +469,20 @@ class CarApp extends StatelessWidget {
   }
 }
 
+Widget sumRow(String label, String value, {bool bold = false}) {
+  final style = TextStyle(
+    fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+    fontSize: bold ? 17 : 15,
+  );
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [Text(label, style: style), Text(value, style: style)],
+    ),
+  );
+}
+
 class HomePage extends StatefulWidget {
   final Store store;
   const HomePage({super.key, required this.store});
@@ -358,6 +494,70 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int tab = 0;
 
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _menu(String v) async {
+    final store = widget.store;
+    switch (v) {
+      case 'report':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ReportPage(store: store)),
+        );
+        break;
+      case 'backup':
+        await Clipboard.setData(ClipboardData(text: store.exportJson()));
+        _snack('تم نسخ كل بياناتك. الصقها في ملاحظات أو أرسلها لنفسك للحفظ');
+        break;
+      case 'restore':
+        _restoreDialog();
+        break;
+      case 'test':
+        final ok = await Notifier.test();
+        _snack(ok
+            ? 'أُرسل إشعار تجريبي'
+            : 'التنبيهات غير مفعّلة: فعّلها من إعدادات الهاتف للتطبيق');
+        break;
+    }
+  }
+
+  void _restoreDialog() {
+    final ctl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('استعادة من نسخة احتياطية'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('الصق النص المنسوخ سابقاً. سيتم استبدال البيانات الحالية.'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctl,
+              maxLines: 5,
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          FilledButton(
+            onPressed: () {
+              final ok = widget.store.importJson(ctl.text);
+              Navigator.pop(ctx);
+              _snack(ok ? 'تمت الاستعادة بنجاح' : 'النص غير صالح');
+            },
+            child: const Text('استعادة'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
@@ -366,20 +566,20 @@ class _HomePageState extends State<HomePage> {
       builder: (context, _) {
         return Scaffold(
           appBar: AppBar(
-            title: Text(tab == 0 ? 'صيانة سيارتي' : 'سجل الصيانة'),
+            title: Text(tab == 0 ? store.carName : 'سجل ${store.carName}'),
             actions: [
               IconButton(
-                tooltip: 'تجربة التنبيه',
-                icon: const Icon(Icons.notifications_active_outlined),
-                onPressed: () async {
-                  final ok = await Notifier.test();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(ok
-                        ? 'أُرسل إشعار تجريبي'
-                        : 'التنبيهات غير مفعّلة: فعّلها من إعدادات الهاتف للتطبيق'),
-                  ));
-                },
+                tooltip: 'تقرير PDF',
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                onPressed: () => _menu('report'),
+              ),
+              PopupMenuButton<String>(
+                onSelected: _menu,
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'backup', child: Text('نسخ احتياطي (نسخ البيانات)')),
+                  PopupMenuItem(value: 'restore', child: Text('استعادة من نسخة')),
+                  PopupMenuItem(value: 'test', child: Text('تجربة التنبيه')),
+                ],
               ),
             ],
           ),
@@ -409,10 +609,16 @@ class _HomePageState extends State<HomePage> {
 
   Widget _itemsTab(BuildContext context) {
     final store = widget.store;
+    final car = store.car;
     final entries = store.items
         .map((it) => MapEntry(it, store.statusOf(it)))
         .toList()
       ..sort((a, b) => a.value.level.index.compareTo(b.value.level.index));
+
+    final sub = StringBuffer('العداد: ${fmt(car.km)} كم');
+    if (car.purchasePrice != null) {
+      sub.write('\nثمن الشراء: ${fmtMoney(car.purchasePrice!)}');
+    }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
@@ -420,15 +626,26 @@ class _HomePageState extends State<HomePage> {
         Card(
           child: ListTile(
             leading: const Icon(Icons.directions_car, size: 36),
-            title: Text(store.carName,
+            title: Text(car.name,
                 style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text('العداد: ${fmt(store.currentKm)} كم'),
-            trailing: IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => showDialog(
-                context: context,
-                builder: (_) => CarDialog(store: store),
-              ),
+            subtitle: Text(sub.toString()),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'السيارات',
+                  icon: const Icon(Icons.swap_horiz),
+                  onPressed: () => showCars(context, store),
+                ),
+                IconButton(
+                  tooltip: 'تعديل السيارة',
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (_) => CarDialog(store: store, car: car),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -458,24 +675,35 @@ class _HomePageState extends State<HomePage> {
 
   Widget _historyTab(BuildContext context) {
     final store = widget.store;
+    final car = store.car;
     final list = [...store.services]..sort((a, b) => b.date.compareTo(a.date));
-    if (list.isEmpty) {
-      return const Center(child: Text('لا توجد صيانات مسجلة بعد'));
-    }
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         Card(
           color: Theme.of(context).colorScheme.primaryContainer,
-          child: ListTile(
-            leading: const Icon(Icons.payments),
-            title: const Text('مجموع المصاريف'),
-            trailing: Text(
-              fmtMoney(store.totalCost),
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              children: [
+                if (car.purchasePrice != null)
+                  sumRow('ثمن الشراء', fmtMoney(car.purchasePrice!)),
+                sumRow('مصاريف الصيانة', fmtMoney(car.maintenanceCost)),
+                const Divider(),
+                sumRow('المجموع الكلي', fmtMoney(car.totalCost), bold: true),
+                if (store.cars.length > 1) ...[
+                  const SizedBox(height: 6),
+                  sumRow('مجموع كل السيارات', fmtMoney(store.grandTotal)),
+                ],
+              ],
             ),
           ),
         ),
+        if (list.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: Text('لا توجد صيانات مسجلة بعد')),
+          ),
         for (final s in list) _serviceTile(context, store, s),
       ],
     );
@@ -504,6 +732,69 @@ Widget _serviceTile(BuildContext context, Store store, Service s) {
             },
           ),
         ],
+      ),
+    ),
+  );
+}
+
+// ====================== قائمة السيارات ======================
+
+void showCars(BuildContext context, Store store) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => ListenableBuilder(
+      listenable: store,
+      builder: (ctx, _) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('سياراتي', style: Theme.of(ctx).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final c in store.cars)
+                      ListTile(
+                        leading: Icon(c.id == store.currentId
+                            ? Icons.check_circle
+                            : Icons.circle_outlined),
+                        title: Text(c.name),
+                        subtitle: Text('${fmt(c.km)} كم'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => showDialog(
+                            context: ctx,
+                            builder: (_) => CarDialog(store: store, car: c),
+                          ),
+                        ),
+                        onTap: () {
+                          store.selectCar(c.id);
+                          Navigator.pop(ctx);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () async {
+                  await showDialog(
+                    context: ctx,
+                    builder: (_) => CarDialog(store: store),
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('إضافة سيارة'),
+              ),
+            ],
+          ),
+        ),
       ),
     ),
   );
@@ -816,25 +1107,32 @@ class _ItemDialogState extends State<ItemDialog> {
   }
 }
 
+/// إضافة سيارة جديدة (car == null) أو تعديل سيارة موجودة
 class CarDialog extends StatefulWidget {
   final Store store;
-  const CarDialog({super.key, required this.store});
+  final Car? car;
+  const CarDialog({super.key, required this.store, this.car});
 
   @override
   State<CarDialog> createState() => _CarDialogState();
 }
 
 class _CarDialogState extends State<CarDialog> {
-  late final TextEditingController name =
-      TextEditingController(text: widget.store.carName);
+  late final TextEditingController name = TextEditingController(
+      text: widget.car?.name ?? 'سيارة ${widget.store.cars.length + 1}');
   late final TextEditingController km =
-      TextEditingController(text: widget.store.currentKm.toString());
+      TextEditingController(text: (widget.car?.km ?? 0).toString());
+  late final TextEditingController price = TextEditingController(
+      text: widget.car?.purchasePrice == null
+          ? ''
+          : numText(widget.car!.purchasePrice!));
   String? error;
 
   @override
   void dispose() {
     name.dispose();
     km.dispose();
+    price.dispose();
     super.dispose();
   }
 
@@ -844,15 +1142,29 @@ class _CarDialogState extends State<CarDialog> {
       setState(() => error = 'أدخل العداد بأرقام صحيحة');
       return;
     }
+    double? p;
+    if (price.text.trim().isNotEmpty) {
+      p = parseDouble(price.text.trim());
+      if (p == null || p < 0) {
+        setState(() => error = 'سعر الشراء غير صحيح');
+        return;
+      }
+    }
     final n = name.text.trim().isEmpty ? 'سيارتي' : name.text.trim();
-    widget.store.setCar(n, k);
+    final c = widget.car;
+    if (c == null) {
+      widget.store.addCar(n, k, p);
+    } else {
+      widget.store.updateCar(c, n, k, p);
+    }
     Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
+    final c = widget.car;
     return AlertDialog(
-      title: const Text('بيانات السيارة'),
+      title: Text(c == null ? 'سيارة جديدة' : 'بيانات السيارة'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -868,6 +1180,13 @@ class _CarDialogState extends State<CarDialog> {
               decoration:
                   const InputDecoration(labelText: 'العداد الحالي (كم)'),
             ),
+            TextField(
+              controller: price,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                  labelText: 'ثمن الشراء (دج) - اختياري'),
+            ),
             if (error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -877,6 +1196,17 @@ class _CarDialogState extends State<CarDialog> {
         ),
       ),
       actions: [
+        if (c != null && widget.store.cars.length > 1)
+          TextButton(
+            onPressed: () async {
+              if (await confirm(
+                  context, 'حذف هذه السيارة وكل صيانتها نهائياً؟')) {
+                widget.store.deleteCar(c);
+                if (context.mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+          ),
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('إلغاء')),
