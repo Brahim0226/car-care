@@ -32,7 +32,15 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build apk --release
+      - name: Build APK (مع إعادة المحاولة عند أخطاء الشبكة)
+        run: |
+          flutter --version
+          for i in 1 2 3; do
+            flutter build apk --release && exit 0
+            echo "المحاولة $i فشلت، نعيد بعد 40 ثانية..."
+            sleep 40
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
