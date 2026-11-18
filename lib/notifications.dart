@@ -4,6 +4,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'l10n.dart';
 import 'main.dart';
 
 /// تنبيهات الصيانة:
@@ -16,11 +17,11 @@ class Notifier {
   static bool _busy = false;
   static bool _again = false;
 
-  static const NotificationDetails _details = NotificationDetails(
+  static NotificationDetails get _details => NotificationDetails(
     android: AndroidNotificationDetails(
       'maintenance',
-      'تنبيهات الصيانة',
-      channelDescription: 'تذكيرات مواعيد صيانة السيارة',
+      t('تنبيهات الصيانة', "Alertes d'entretien"),
+      channelDescription: t('تذكيرات مواعيد صيانة السيارة', "Rappels des échéances d'entretien de la voiture"),
       importance: Importance.high,
       priority: Priority.high,
     ),
@@ -48,7 +49,7 @@ class Notifier {
     if (!ready) return false;
     try {
       await _plugin.show(
-          1, 'تنبيه تجريبي', 'التنبيهات تعمل بنجاح ✅', _details);
+          1, t('تنبيه تجريبي', "Notification de test"), t('التنبيهات تعمل بنجاح ✅', "Les notifications fonctionnent ✅"), _details);
       return true;
     } catch (_) {
       return false;
@@ -85,7 +86,7 @@ class Notifier {
     var id = 100;
     final multi = store.cars.length > 1;
     for (final car in store.cars) {
-      final tag = multi ? ' • ${car.name}' : '';
+      final tag = multi ? ' • ${car.label}' : '';
       for (final it in car.items) {
         final last = car.lastService(it.id);
         if (last == null || it.intervalMonths <= 0) continue;
@@ -94,15 +95,15 @@ class Notifier {
         final before = due.subtract(const Duration(days: 7));
         await _schedule(
           id++,
-          'اقترب موعد: ${it.name}$tag',
-          'باقي أسبوع على موعد الصيانة (${fmtDate(due)})',
+          t('اقترب موعد: ${it.label}$tag', "Échéance proche : ${it.label}$tag"),
+          t('باقي أسبوع على موعد الصيانة (${fmtDate(due)})', "Plus qu'une semaine avant l'entretien (${fmtDate(due)})"),
           before,
           now,
         );
         await _schedule(
           id++,
-          'حان موعد: ${it.name}$tag',
-          'موعد الصيانة اليوم (${fmtDate(due)})',
+          t('حان موعد: ${it.label}$tag', "C'est l'heure : ${it.label}$tag"),
+          t('موعد الصيانة اليوم (${fmtDate(due)})', "Entretien prévu aujourd'hui (${fmtDate(due)})"),
           due,
           now,
         );
@@ -120,12 +121,12 @@ class Notifier {
     DateTime now,
   ) async {
     if (!when.isAfter(now)) return;
-    final t = tz.TZDateTime.from(when, tz.local);
+    final at = tz.TZDateTime.from(when, tz.local);
     await _plugin.zonedSchedule(
       id,
       title,
       body,
-      t,
+      at,
       _details,
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
     );
@@ -142,7 +143,7 @@ class Notifier {
     final multi = store.cars.length > 1;
     var n = 0;
     for (final car in store.cars) {
-      final tag = multi ? ' • ${car.name}' : '';
+      final tag = multi ? ' • ${car.label}' : '';
       for (final it in car.items) {
         if (it.intervalKm <= 0) continue;
         final last = car.lastService(it.id);
@@ -155,11 +156,11 @@ class Notifier {
         next[key] = lvl > prev ? lvl : prev;
         if (lvl > prev) {
           final title = lvl == 2
-              ? 'تجاوزت موعد: ${it.name}$tag'
-              : 'اقترب موعد: ${it.name}$tag';
+              ? t('تجاوزت موعد: ${it.label}$tag', "Échéance dépassée : ${it.label}$tag")
+              : t('اقترب موعد: ${it.label}$tag', "Échéance proche : ${it.label}$tag");
           final body = lvl == 2
-              ? 'تجاوزت ${fmt(-rem)} كم، يُفضَّل إجراء الصيانة قريباً'
-              : 'باقي ${fmt(rem)} كم على الصيانة';
+              ? t('تجاوزت ${fmt(-rem)} كم، يُفضَّل إجراء الصيانة قريباً', "Dépassé de ${fmt(-rem)} km, entretien conseillé bientôt")
+              : t('باقي ${fmt(rem)} كم على الصيانة', "Plus que ${fmt(rem)} km avant l'entretien");
           await _plugin.show(5000 + n, title, body, _details);
         }
         n++;

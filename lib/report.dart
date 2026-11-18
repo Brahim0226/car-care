@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'l10n.dart';
 import 'main.dart';
 
 // ====================== خيارات الحساب ======================
@@ -78,7 +79,7 @@ class _Pager {
 
   Future<void> end() async {
     _paint(
-      'صفحة ${pages.length + 1}',
+      t('صفحة ${pages.length + 1}', "Page ${pages.length + 1}"),
       x: margin,
       width: pageW - 2 * margin,
       top: pageH - 70,
@@ -103,7 +104,7 @@ class _Pager {
     double size = 26,
     bool bold = false,
     Color color = Colors.black,
-    TextAlign align = TextAlign.right,
+    TextAlign? align,
     int maxLines = 2,
   }) {
     final tp = TextPainter(
@@ -116,8 +117,8 @@ class _Pager {
           height: 1.3,
         ),
       ),
-      textDirection: TextDirection.rtl,
-      textAlign: align,
+      textDirection: Lang.dir,
+      textAlign: align ?? Lang.start,
       maxLines: maxLines,
       ellipsis: '…',
     )..layout(minWidth: width, maxWidth: width);
@@ -138,7 +139,7 @@ class _Pager {
     double size = 26,
     bool bold = false,
     Color color = Colors.black,
-    TextAlign align = TextAlign.right,
+    TextAlign? align,
     double gap = 10,
   }) async {
     await ensure(size * 1.6 + gap);
@@ -180,21 +181,23 @@ class _Pager {
         Paint()..color = const Color(0xFFF1F4F9),
       );
     }
-    var right = pageW - margin;
+    // العربية: الأعمدة من اليمين لليسار. الفرنسية: من اليسار لليمين.
+    var edge = Lang.fr ? margin : pageW - margin;
     for (var i = 0; i < cells.length && i < colW.length; i++) {
       final w = colW[i];
+      final left = Lang.fr ? edge : edge - w;
       _paint(
         cells[i],
-        x: right - w + 8,
+        x: left + 8,
         width: w - 16,
         top: y + 9,
         size: 24,
         bold: header,
         color: header ? Colors.white : Colors.black,
-        align: i == 0 ? TextAlign.right : TextAlign.center,
+        align: i == 0 ? Lang.start : TextAlign.center,
         maxLines: 1,
       );
-      right -= w;
+      edge += Lang.fr ? w : -w;
     }
     y += h;
   }
@@ -219,8 +222,8 @@ Future<Uint8List> buildReportPdf(Store store, ReportOptions o) async {
   final data = computeReport(store, o);
   final p = _Pager()..begin();
 
-  await p.line('تقرير السيارات', size: 46, bold: true, color: const Color(0xFF1565C0));
-  await p.line('تاريخ الإنشاء: ${fmtDate(DateTime.now())}', size: 24, color: Colors.grey, gap: 18);
+  await p.line(t('تقرير السيارات', "Rapport des voitures"), size: 46, bold: true, color: const Color(0xFF1565C0));
+  await p.line(t('تاريخ الإنشاء: ${fmtDate(DateTime.now())}', "Créé le : ${fmtDate(DateTime.now())}"), size: 24, color: Colors.grey, gap: 18);
   await p.rule();
 
   var sumPurchase = 0.0;
@@ -232,14 +235,14 @@ Future<Uint8List> buildReportPdf(Store store, ReportOptions o) async {
     sumMaint += r.maintenance;
 
     p.space(10);
-    await p.line(car.name, size: 36, bold: true, gap: 4);
-    await p.line('العداد: ${fmt(car.km)} كم', size: 24, color: Colors.black54, gap: 12);
+    await p.line(car.label, size: 36, bold: true, gap: 4);
+    await p.line(t('العداد: ${fmt(car.km)} كم', "Compteur : ${fmt(car.km)} km"), size: 24, color: Colors.black54, gap: 12);
 
     if (o.purchase) {
       await p.line(
         car.purchasePrice == null
-            ? 'ثمن الشراء: غير مسجل'
-            : 'ثمن الشراء: ${fmtMoney(car.purchasePrice!)}',
+            ? t('ثمن الشراء: غير مسجل', "Prix d'achat : non renseigné")
+            : t('ثمن الشراء: ${fmtMoney(car.purchasePrice!)}', "Prix d'achat : ${fmtMoney(car.purchasePrice!)}"),
         size: 28,
         gap: 12,
       );
@@ -247,13 +250,13 @@ Future<Uint8List> buildReportPdf(Store store, ReportOptions o) async {
 
     if (o.maintenance) {
       if (r.rows.isEmpty) {
-        await p.line('لا توجد صيانات مطابقة للاختيار', size: 24, color: Colors.black54);
+        await p.line(t('لا توجد صيانات مطابقة للاختيار', "Aucun entretien correspondant à la sélection"), size: 24, color: Colors.black54);
       } else {
-        await p.startTable(['البند', 'التاريخ', 'العداد (كم)', 'السعر (دج)', 'ملاحظة']);
+        await p.startTable([t('البند', "Élément"), t('التاريخ', "Date"), t('العداد (كم)', "Compteur (km)"), t('السعر (دج)', "Prix (DA)"), t('ملاحظة', "Remarque")]);
         var i = 0;
         for (final s in r.rows) {
           await p.row([
-            car.itemById(s.itemId)?.name ?? 'بند محذوف',
+            car.itemById(s.itemId)?.label ?? t('بند محذوف', "Élément supprimé"),
             fmtDate(s.date),
             fmt(s.km),
             s.cost > 0 ? fmt(s.cost.round()) : '—',
@@ -263,12 +266,12 @@ Future<Uint8List> buildReportPdf(Store store, ReportOptions o) async {
         }
         p.endTable();
         p.space(10);
-        await p.line('مجموع الصيانة: ${fmtMoney(r.maintenance)}', size: 28, gap: 8);
+        await p.line(t('مجموع الصيانة: ${fmtMoney(r.maintenance)}', "Total entretien : ${fmtMoney(r.maintenance)}"), size: 28, gap: 8);
       }
     }
 
     await p.line(
-      'إجمالي ${car.name}: ${fmtMoney(r.total)}',
+      t('إجمالي ${car.label}: ${fmtMoney(r.total)}', "Total ${car.label} : ${fmtMoney(r.total)}"),
       size: 30,
       bold: true,
       gap: 14,
@@ -277,15 +280,15 @@ Future<Uint8List> buildReportPdf(Store store, ReportOptions o) async {
   }
 
   p.space(8);
-  await p.line('الإجمالي العام', size: 38, bold: true, gap: 8);
+  await p.line(t('الإجمالي العام', "Total général"), size: 38, bold: true, gap: 8);
   if (o.purchase) {
-    await p.line('مجموع ثمن الشراء: ${fmtMoney(sumPurchase)}', size: 28, gap: 6);
+    await p.line(t('مجموع ثمن الشراء: ${fmtMoney(sumPurchase)}', "Total prix d'achat : ${fmtMoney(sumPurchase)}"), size: 28, gap: 6);
   }
   if (o.maintenance) {
-    await p.line('مجموع الصيانة: ${fmtMoney(sumMaint)}', size: 28, gap: 6);
+    await p.line(t('مجموع الصيانة: ${fmtMoney(sumMaint)}', "Total entretien : ${fmtMoney(sumMaint)}"), size: 28, gap: 6);
   }
   await p.line(
-    'المجموع: ${fmtMoney(sumPurchase + sumMaint)}',
+    t('المجموع: ${fmtMoney(sumPurchase + sumMaint)}', "Total : ${fmtMoney(sumPurchase + sumMaint)}"),
     size: 42,
     bold: true,
     color: const Color(0xFF1565C0),
@@ -331,7 +334,7 @@ class _ReportPageState extends State<ReportPage> {
     final m = <String, String>{};
     for (final c in widget.store.cars) {
       for (final it in c.items) {
-        m.putIfAbsent(it.id, () => it.name);
+        m.putIfAbsent(it.id, () => it.label);
       }
     }
     return m;
@@ -359,7 +362,7 @@ class _ReportPageState extends State<ReportPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('تعذّر إنشاء التقرير: $e')),
+          SnackBar(content: Text(t('تعذّر إنشاء التقرير: $e', "Impossible de créer le rapport : $e"))),
         );
       }
     } finally {
@@ -377,13 +380,13 @@ class _ReportPageState extends State<ReportPage> {
     final canMake = carIds.isNotEmpty && (purchase || maint) && !busy;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('تقرير PDF')),
+      appBar: AppBar(title: Text(t('تقرير PDF', "Rapport PDF"))),
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-            child: Text('السيارات',
+            child: Text(t('السيارات', "Voitures"),
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
           Card(
@@ -392,10 +395,10 @@ class _ReportPageState extends State<ReportPage> {
                 for (final c in store.cars)
                   CheckboxListTile(
                     value: carIds.contains(c.id),
-                    title: Text(c.name),
+                    title: Text(c.label),
                     subtitle: Text(c.purchasePrice == null
-                        ? 'بدون ثمن شراء'
-                        : 'ثمن الشراء: ${fmtMoney(c.purchasePrice!)}'),
+                        ? t('بدون ثمن شراء', "Sans prix d'achat")
+                        : t('ثمن الشراء: ${fmtMoney(c.purchasePrice!)}', "Prix d'achat : ${fmtMoney(c.purchasePrice!)}")),
                     onChanged: (v) => setState(() {
                       if (v == true) {
                         carIds.add(c.id);
@@ -407,24 +410,24 @@ class _ReportPageState extends State<ReportPage> {
               ],
             ),
           ),
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-            child: Text('ماذا يظهر في التقرير',
+            child: Text(t('ماذا يظهر في التقرير', "Contenu du rapport"),
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
           Card(
             child: Column(
               children: [
                 SwitchListTile(
-                  title: const Text('ثمن شراء السيارة'),
+                  title: Text(t('ثمن شراء السيارة', "Prix d'achat de la voiture")),
                   subtitle: hasPrice || carIds.isEmpty
                       ? null
-                      : const Text('لا يوجد ثمن شراء مسجل للسيارات المختارة'),
+                      : Text(t('لا يوجد ثمن شراء مسجل للسيارات المختارة', "Aucun prix d'achat renseigné pour les voitures choisies")),
                   value: purchase,
                   onChanged: (v) => setState(() => purchase = v),
                 ),
                 SwitchListTile(
-                  title: const Text('الصيانة'),
+                  title: Text(t('الصيانة', "Entretien")),
                   value: maint,
                   onChanged: (v) => setState(() => maint = v),
                 ),
@@ -459,10 +462,10 @@ class _ReportPageState extends State<ReportPage> {
               padding: const EdgeInsets.all(14),
               child: Column(
                 children: [
-                  if (purchase) sumRow('ثمن الشراء', fmtMoney(sumP)),
-                  if (maint) sumRow('الصيانة', fmtMoney(sumM)),
+                  if (purchase) sumRow(t('ثمن الشراء', "Prix d'achat"), fmtMoney(sumP)),
+                  if (maint) sumRow(t('الصيانة', "Entretien"), fmtMoney(sumM)),
                   const Divider(),
-                  sumRow('المجموع', fmtMoney(sumP + sumM), bold: true),
+                  sumRow(t('المجموع', "Total"), fmtMoney(sumP + sumM), bold: true),
                 ],
               ),
             ),
@@ -477,13 +480,13 @@ class _ReportPageState extends State<ReportPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.picture_as_pdf),
-            label: const Text('معاينة / طباعة / حفظ PDF'),
+            label: Text(t('معاينة / طباعة / حفظ PDF', "Aperçu / Imprimer / Enregistrer PDF")),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: canMake ? () => _make(true) : null,
             icon: const Icon(Icons.share),
-            label: const Text('مشاركة PDF'),
+            label: Text(t('مشاركة PDF', "Partager le PDF")),
           ),
         ],
       ),

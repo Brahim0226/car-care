@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'l10n.dart';
 import 'notifications.dart';
 import 'report.dart';
 
@@ -39,7 +40,7 @@ String fmt(int n) => n
 String fmtDate(DateTime d) =>
     '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
 
-String fmtMoney(double v) => '${fmt(v.round())} دج';
+String fmtMoney(double v) => t('${fmt(v.round())} دج', "${fmt(v.round())} DA");
 
 String numText(double v) =>
     v == v.roundToDouble() ? v.round().toString() : v.toString();
@@ -52,10 +53,10 @@ Future<bool> confirm(BuildContext context, String msg) async {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء')),
+            child: Text(t('إلغاء', "Annuler"))),
         FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('تأكيد')),
+            child: Text(t('تأكيد', "Confirmer"))),
       ],
     ),
   );
@@ -89,6 +90,20 @@ IconData iconFor(String id) {
 
 // ====================== النماذج ======================
 
+/// أسماء البنود الافتراضية بالعربية والفرنسية (تُعرض حسب اللغة ما لم يغيّر المستخدم الاسم)
+const Map<String, List<String>> defaultNames = {
+  'oil': ['زيت المحرك', 'Huile moteur'],
+  'oil_filter': ['فلتر الزيت', 'Filtre à huile'],
+  'air_filter': ['فلتر الهواء', 'Filtre à air'],
+  'fuel_filter': ['فلتر الوقود (مازوط/بنزين)', 'Filtre à carburant (gasoil/essence)'],
+  'cabin_filter': ['فلتر المكيّف', "Filtre d'habitacle (clim)"],
+  'belt': ['سير/سلسلة التوزيع (لاشان)', 'Courroie/chaîne de distribution'],
+  'tires': ['العجلات', 'Pneus'],
+  'brakes': ['الفرامل (بلاكات)', 'Freins (plaquettes)'],
+  'spark': ['شمعات الإشعال', "Bougies d'allumage"],
+  'battery': ['البطارية', 'Batterie'],
+};
+
 class Item {
   final String id;
   String name;
@@ -101,6 +116,13 @@ class Item {
     required this.intervalKm,
     required this.intervalMonths,
   });
+
+  /// الاسم المعروض حسب اللغة
+  String get label {
+    final d = defaultNames[id];
+    if (d != null && (name == d[0] || name == d[1])) return t(d[0], d[1]);
+    return name;
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -213,7 +235,7 @@ class Car {
 
   factory Car.fromJson(Map<String, dynamic> j) => Car(
         id: j['id'] as String,
-        name: j['name'] as String? ?? 'سيارتي',
+        name: j['name'] as String? ?? t('سيارتي', "Ma voiture"),
         km: (j['km'] as num?)?.toInt() ?? 0,
         purchasePrice: (j['purchasePrice'] as num?)?.toDouble(),
         items: ((j['items'] as List?) ?? [])
@@ -223,6 +245,10 @@ class Car {
             .map((e) => Service.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
+
+  /// اسم السيارة المعروض (الاسم الافتراضي يُترجم حسب اللغة)
+  String get label =>
+      (name == 'سيارتي' || name == 'Ma voiture') ? t('سيارتي', 'Ma voiture') : name;
 
   Item? itemById(String id) {
     for (final i in items) {
@@ -252,7 +278,7 @@ class Car {
   Status statusOf(Item it) {
     final last = lastService(it.id);
     if (last == null) {
-      return const Status(Level.none, 'لم تُسجَّل أي صيانة بعد');
+      return Status(Level.none, t('لم تُسجَّل أي صيانة بعد', "Aucun entretien enregistré"));
     }
     int? remKm;
     int? remDays;
@@ -265,14 +291,14 @@ class Car {
       remDays = next.difference(DateTime.now()).inDays;
     }
     if (remKm == null && remDays == null) {
-      return const Status(Level.ok, 'بدون موعد محدد');
+      return Status(Level.ok, t('بدون موعد محدد', "Sans échéance définie"));
     }
     final parts = <String>[];
     if (remKm != null) {
-      parts.add(remKm < 0 ? 'تجاوزت ${fmt(-remKm)} كم' : 'باقي ${fmt(remKm)} كم');
+      parts.add(remKm < 0 ? t('تجاوزت ${fmt(-remKm)} كم', "Dépassé de ${fmt(-remKm)} km") : t('باقي ${fmt(remKm)} كم', "Reste ${fmt(remKm)} km"));
     }
     if (remDays != null) {
-      parts.add(remDays < 0 ? 'تجاوزت ${-remDays} يوم' : 'باقي $remDays يوم');
+      parts.add(remDays < 0 ? t('تجاوزت ${-remDays} يوم', "Dépassé de ${-remDays} j") : t('باقي $remDays يوم', "Reste $remDays j"));
     }
     final overdue =
         (remKm != null && remKm < 0) || (remDays != null && remDays < 0);
@@ -297,6 +323,14 @@ class Store extends ChangeNotifier {
   static Future<Store> load() async {
     final prefs = await SharedPreferences.getInstance();
     final s = Store(prefs);
+    // اللغة: المحفوظة، وإلا لغة الهاتف (الفرنسية إن كانت لغة الهاتف) وإلا العربية
+    final saved = prefs.getString('lang');
+    if (saved == 'fr' || saved == 'ar') {
+      Lang.code = saved!;
+    } else {
+      final dev = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+      Lang.code = dev == 'fr' ? 'fr' : 'ar';
+    }
     final raw = prefs.getString('data');
     if (raw != null) {
       try {
@@ -304,7 +338,7 @@ class Store extends ChangeNotifier {
       } catch (_) {}
     }
     if (s.cars.isEmpty) {
-      s.cars = [Car(id: newId(), name: 'سيارتي')];
+      s.cars = [Car(id: newId(), name: t('سيارتي', "Ma voiture"))];
     }
     if (!s.cars.any((c) => c.id == s.currentId)) {
       s.currentId = s.cars.first.id;
@@ -322,7 +356,7 @@ class Store extends ChangeNotifier {
       // بيانات النسخة القديمة (سيارة واحدة): نحوّلها تلقائياً
       final old = Car(
         id: newId(),
-        name: j['carName'] as String? ?? 'سيارتي',
+        name: j['carName'] as String? ?? t('سيارتي', "Ma voiture"),
         km: (j['currentKm'] as num?)?.toInt() ?? 0,
         items: ((j['items'] as List?) ?? [])
             .map((e) => Item.fromJson(e as Map<String, dynamic>))
@@ -343,6 +377,12 @@ class Store extends ChangeNotifier {
 
   void _save() {
     prefs.setString('data', jsonEncode(_toJson()));
+    notifyListeners();
+  }
+
+  void setLang(String code) {
+    Lang.code = code;
+    prefs.setString('lang', code);
     notifyListeners();
   }
 
@@ -372,7 +412,7 @@ class Store extends ChangeNotifier {
     return cars.first;
   }
 
-  String get carName => car.name;
+  String get carName => car.label;
   int get currentKm => car.km;
   List<Item> get items => car.items;
   List<Service> get services => car.services;
@@ -454,17 +494,20 @@ class CarApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'صيانة سيارتي',
-      debugShowCheckedModeBanner: false,
-      locale: const Locale('ar'),
-      supportedLocales: const [Locale('ar')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF1565C0),
-        useMaterial3: true,
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) => MaterialApp(
+        title: t('صيانة سيارتي', "Entretien auto"),
+        debugShowCheckedModeBanner: false,
+        locale: Locale(Lang.code),
+        supportedLocales: const [Locale('ar'), Locale('fr')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        theme: ThemeData(
+          colorSchemeSeed: const Color(0xFF1565C0),
+          useMaterial3: true,
+        ),
+        home: HomePage(store: store),
       ),
-      home: HomePage(store: store),
     );
   }
 }
@@ -510,18 +553,48 @@ class _HomePageState extends State<HomePage> {
         break;
       case 'backup':
         await Clipboard.setData(ClipboardData(text: store.exportJson()));
-        _snack('تم نسخ كل بياناتك. الصقها في ملاحظات أو أرسلها لنفسك للحفظ');
+        _snack(t('تم نسخ كل بياناتك. الصقها في ملاحظات أو أرسلها لنفسك للحفظ', "Toutes vos données ont été copiées. Collez-les dans une note ou envoyez-les-vous pour les conserver"));
         break;
       case 'restore':
         _restoreDialog();
         break;
+      case 'lang':
+        _langDialog();
+        break;
       case 'test':
         final ok = await Notifier.test();
         _snack(ok
-            ? 'أُرسل إشعار تجريبي'
-            : 'التنبيهات غير مفعّلة: فعّلها من إعدادات الهاتف للتطبيق');
+            ? t('أُرسل إشعار تجريبي', "Notification de test envoyée")
+            : t('التنبيهات غير مفعّلة: فعّلها من إعدادات الهاتف للتطبيق', "Notifications désactivées : activez-les dans les paramètres du téléphone pour l'application"));
         break;
     }
+  }
+
+  void _langDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('اللغة / Langue'),
+        children: [
+          ListTile(
+            title: const Text('العربية'),
+            trailing: Lang.code == 'ar' ? const Icon(Icons.check) : null,
+            onTap: () {
+              widget.store.setLang('ar');
+              Navigator.pop(ctx);
+            },
+          ),
+          ListTile(
+            title: const Text('Français'),
+            trailing: Lang.code == 'fr' ? const Icon(Icons.check) : null,
+            onTap: () {
+              widget.store.setLang('fr');
+              Navigator.pop(ctx);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   void _restoreDialog() {
@@ -529,11 +602,11 @@ class _HomePageState extends State<HomePage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('استعادة من نسخة احتياطية'),
+        title: Text(t('استعادة من نسخة احتياطية', "Restaurer une sauvegarde")),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('الصق النص المنسوخ سابقاً. سيتم استبدال البيانات الحالية.'),
+            Text(t('الصق النص المنسوخ سابقاً. سيتم استبدال البيانات الحالية.', "Collez le texte copié précédemment. Les données actuelles seront remplacées.")),
             const SizedBox(height: 8),
             TextField(
               controller: ctl,
@@ -544,14 +617,14 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+              onPressed: () => Navigator.pop(ctx), child: Text(t('إلغاء', "Annuler"))),
           FilledButton(
             onPressed: () {
               final ok = widget.store.importJson(ctl.text);
               Navigator.pop(ctx);
-              _snack(ok ? 'تمت الاستعادة بنجاح' : 'النص غير صالح');
+              _snack(ok ? t('تمت الاستعادة بنجاح', "Restauration réussie") : t('النص غير صالح', "Texte invalide"));
             },
-            child: const Text('استعادة'),
+            child: Text(t('استعادة', "Restaurer")),
           ),
         ],
       ),
@@ -566,19 +639,20 @@ class _HomePageState extends State<HomePage> {
       builder: (context, _) {
         return Scaffold(
           appBar: AppBar(
-            title: Text(tab == 0 ? store.carName : 'سجل ${store.carName}'),
+            title: Text(tab == 0 ? store.carName : t('سجل ${store.carName}', "Historique ${store.carName}")),
             actions: [
               IconButton(
-                tooltip: 'تقرير PDF',
+                tooltip: t('تقرير PDF', "Rapport PDF"),
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 onPressed: () => _menu('report'),
               ),
               PopupMenuButton<String>(
                 onSelected: _menu,
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'backup', child: Text('نسخ احتياطي (نسخ البيانات)')),
-                  PopupMenuItem(value: 'restore', child: Text('استعادة من نسخة')),
-                  PopupMenuItem(value: 'test', child: Text('تجربة التنبيه')),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'lang', child: Text('اللغة / Langue')),
+                  PopupMenuItem(value: 'backup', child: Text(t('نسخ احتياطي (نسخ البيانات)', "Sauvegarde (copier les données)"))),
+                  PopupMenuItem(value: 'restore', child: Text(t('استعادة من نسخة', "Restaurer une sauvegarde"))),
+                  PopupMenuItem(value: 'test', child: Text(t('تجربة التنبيه', "Tester la notification"))),
                 ],
               ),
             ],
@@ -591,15 +665,15 @@ class _HomePageState extends State<HomePage> {
                     builder: (_) => ItemDialog(store: store),
                   ),
                   icon: const Icon(Icons.add),
-                  label: const Text('إضافة بند'),
+                  label: Text(t('إضافة بند', "Ajouter un élément")),
                 )
               : null,
           bottomNavigationBar: NavigationBar(
             selectedIndex: tab,
             onDestinationSelected: (i) => setState(() => tab = i),
-            destinations: const [
-              NavigationDestination(icon: Icon(Icons.build), label: 'الصيانات'),
-              NavigationDestination(icon: Icon(Icons.history), label: 'السجل'),
+            destinations: [
+              NavigationDestination(icon: Icon(Icons.build), label: t('الصيانات', "Entretiens")),
+              NavigationDestination(icon: Icon(Icons.history), label: t('السجل', "Historique")),
             ],
           ),
         );
@@ -615,9 +689,9 @@ class _HomePageState extends State<HomePage> {
         .toList()
       ..sort((a, b) => a.value.level.index.compareTo(b.value.level.index));
 
-    final sub = StringBuffer('العداد: ${fmt(car.km)} كم');
+    final sub = StringBuffer(t('العداد: ${fmt(car.km)} كم', "Compteur : ${fmt(car.km)} km"));
     if (car.purchasePrice != null) {
-      sub.write('\nثمن الشراء: ${fmtMoney(car.purchasePrice!)}');
+      sub.write(t('\nثمن الشراء: ${fmtMoney(car.purchasePrice!)}', "\nPrix d'achat : ${fmtMoney(car.purchasePrice!)}"));
     }
 
     return ListView(
@@ -626,19 +700,19 @@ class _HomePageState extends State<HomePage> {
         Card(
           child: ListTile(
             leading: const Icon(Icons.directions_car, size: 36),
-            title: Text(car.name,
+            title: Text(car.label,
                 style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text(sub.toString()),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: 'السيارات',
+                  tooltip: t('السيارات', "Voitures"),
                   icon: const Icon(Icons.swap_horiz),
                   onPressed: () => showCars(context, store),
                 ),
                 IconButton(
-                  tooltip: 'تعديل السيارة',
+                  tooltip: t('تعديل السيارة', "Modifier la voiture"),
                   icon: const Icon(Icons.edit),
                   onPressed: () => showDialog(
                     context: context,
@@ -657,7 +731,7 @@ class _HomePageState extends State<HomePage> {
                 backgroundColor: e.value.color.withOpacity(0.15),
                 child: Icon(iconFor(e.key.id), color: e.value.color),
               ),
-              title: Text(e.key.name),
+              title: Text(e.key.label),
               subtitle:
                   Text(e.value.text, style: TextStyle(color: e.value.color)),
               trailing: const Icon(Icons.chevron_left),
@@ -687,22 +761,22 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               children: [
                 if (car.purchasePrice != null)
-                  sumRow('ثمن الشراء', fmtMoney(car.purchasePrice!)),
-                sumRow('مصاريف الصيانة', fmtMoney(car.maintenanceCost)),
+                  sumRow(t('ثمن الشراء', "Prix d'achat"), fmtMoney(car.purchasePrice!)),
+                sumRow(t('مصاريف الصيانة', "Frais d'entretien"), fmtMoney(car.maintenanceCost)),
                 const Divider(),
-                sumRow('المجموع الكلي', fmtMoney(car.totalCost), bold: true),
+                sumRow(t('المجموع الكلي', "Total général"), fmtMoney(car.totalCost), bold: true),
                 if (store.cars.length > 1) ...[
                   const SizedBox(height: 6),
-                  sumRow('مجموع كل السيارات', fmtMoney(store.grandTotal)),
+                  sumRow(t('مجموع كل السيارات', "Total de toutes les voitures"), fmtMoney(store.grandTotal)),
                 ],
               ],
             ),
           ),
         ),
         if (list.isEmpty)
-          const Padding(
+          Padding(
             padding: EdgeInsets.all(24),
-            child: Center(child: Text('لا توجد صيانات مسجلة بعد')),
+            child: Center(child: Text(t('لا توجد صيانات مسجلة بعد', "Aucun entretien enregistré"))),
           ),
         for (final s in list) _serviceTile(context, store, s),
       ],
@@ -712,12 +786,12 @@ class _HomePageState extends State<HomePage> {
 
 Widget _serviceTile(BuildContext context, Store store, Service s) {
   final item = store.itemById(s.itemId);
-  final sub = StringBuffer('${fmtDate(s.date)} • ${fmt(s.km)} كم');
+  final sub = StringBuffer(t('${fmtDate(s.date)} • ${fmt(s.km)} كم', "${fmtDate(s.date)} • ${fmt(s.km)} km"));
   if (s.note.isNotEmpty) sub.write(' • ${s.note}');
   return Card(
     child: ListTile(
       leading: Icon(iconFor(s.itemId)),
-      title: Text(item?.name ?? 'بند محذوف'),
+      title: Text(item?.label ?? t('بند محذوف', "Élément supprimé")),
       subtitle: Text(sub.toString()),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -726,7 +800,7 @@ Widget _serviceTile(BuildContext context, Store store, Service s) {
           IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () async {
-              if (await confirm(context, 'حذف هذا التسجيل؟')) {
+              if (await confirm(context, t('حذف هذا التسجيل؟', "Supprimer cet enregistrement ?"))) {
                 store.deleteService(s);
               }
             },
@@ -752,7 +826,7 @@ void showCars(BuildContext context, Store store) {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('سياراتي', style: Theme.of(ctx).textTheme.titleMedium),
+              Text(t('سياراتي', "Mes voitures"), style: Theme.of(ctx).textTheme.titleMedium),
               const SizedBox(height: 8),
               Flexible(
                 child: ListView(
@@ -763,8 +837,8 @@ void showCars(BuildContext context, Store store) {
                         leading: Icon(c.id == store.currentId
                             ? Icons.check_circle
                             : Icons.circle_outlined),
-                        title: Text(c.name),
-                        subtitle: Text('${fmt(c.km)} كم'),
+                        title: Text(c.label),
+                        subtitle: Text(t('${fmt(c.km)} كم', "${fmt(c.km)} km")),
                         trailing: IconButton(
                           icon: const Icon(Icons.edit),
                           onPressed: () => showDialog(
@@ -790,7 +864,7 @@ void showCars(BuildContext context, Store store) {
                   if (ctx.mounted) Navigator.pop(ctx);
                 },
                 icon: const Icon(Icons.add),
-                label: const Text('إضافة سيارة'),
+                label: Text(t('إضافة سيارة', "Ajouter une voiture")),
               ),
             ],
           ),
@@ -819,12 +893,12 @@ class ItemPage extends StatelessWidget {
         final hist = store.services.where((s) => s.itemId == it.id).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
         final intervals = <String>[];
-        if (it.intervalKm > 0) intervals.add('كل ${fmt(it.intervalKm)} كم');
-        if (it.intervalMonths > 0) intervals.add('كل ${it.intervalMonths} شهر');
+        if (it.intervalKm > 0) intervals.add(t('كل ${fmt(it.intervalKm)} كم', "Tous les ${fmt(it.intervalKm)} km"));
+        if (it.intervalMonths > 0) intervals.add(t('كل ${it.intervalMonths} شهر', "Tous les ${it.intervalMonths} mois"));
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(it.name),
+            title: Text(it.label),
             actions: [
               IconButton(
                 icon: const Icon(Icons.edit),
@@ -836,7 +910,7 @@ class ItemPage extends StatelessWidget {
               IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () async {
-                  if (await confirm(context, 'حذف هذا البند وكل سجلاته؟')) {
+                  if (await confirm(context, t('حذف هذا البند وكل سجلاته؟', "Supprimer cet élément et tout son historique ?"))) {
                     store.deleteItem(it.id);
                     if (context.mounted) Navigator.pop(context);
                   }
@@ -862,10 +936,10 @@ class ItemPage extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                          'الفاصل: ${intervals.isEmpty ? 'غير محدد' : intervals.join(' أو ')}'),
+                          t('الفاصل: ${intervals.isEmpty ? 'غير محدد' : intervals.join(' أو ')}', "Intervalle : ${intervals.isEmpty ? 'non défini' : intervals.join(' ou ')}")),
                       if (last != null)
                         Text(
-                            'آخر صيانة: ${fmtDate(last.date)} • ${fmt(last.km)} كم'),
+                            t('آخر صيانة: ${fmtDate(last.date)} • ${fmt(last.km)} كم', "Dernier entretien : ${fmtDate(last.date)} • ${fmt(last.km)} km")),
                     ],
                   ),
                 ),
@@ -878,13 +952,13 @@ class ItemPage extends StatelessWidget {
                   builder: (_) => ServiceForm(store: store, item: it),
                 ),
                 icon: const Icon(Icons.add_task),
-                label: const Text('سجّل صيانة جديدة'),
+                label: Text(t('سجّل صيانة جديدة', "Enregistrer un entretien")),
               ),
               const SizedBox(height: 16),
-              const Text('السجل',
+              Text(t('السجل', "Historique"),
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 4),
-              if (hist.isEmpty) const Text('لا يوجد تسجيل بعد'),
+              if (hist.isEmpty) Text(t('لا يوجد تسجيل بعد', "Aucun enregistrement")),
               for (final s in hist) _serviceTile(context, store, s),
             ],
           ),
@@ -934,12 +1008,12 @@ class _ServiceFormState extends State<ServiceForm> {
   void _save() {
     final k = parseInt(km.text.trim());
     if (k == null || k < 0) {
-      setState(() => error = 'أدخل العداد بأرقام صحيحة');
+      setState(() => error = t('أدخل العداد بأرقام صحيحة', "Saisissez un kilométrage valide"));
       return;
     }
     final c = cost.text.trim().isEmpty ? 0.0 : parseDouble(cost.text.trim());
     if (c == null || c < 0) {
-      setState(() => error = 'السعر غير صحيح');
+      setState(() => error = t('السعر غير صحيح', "Prix invalide"));
       return;
     }
     widget.store.addService(Service(
@@ -962,35 +1036,35 @@ class _ServiceFormState extends State<ServiceForm> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('تسجيل: ${widget.item.name}',
+            Text(t('تسجيل: ${widget.item.label}', "Enregistrement : ${widget.item.label}"),
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _pick,
               icon: const Icon(Icons.event),
-              label: Text('التاريخ: ${fmtDate(date)}'),
+              label: Text(t('التاريخ: ${fmtDate(date)}', "Date : ${fmtDate(date)}")),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: km,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                  labelText: 'العداد (كم)', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: t('العداد (كم)', "Compteur (km)"), border: OutlineInputBorder()),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: cost,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                  labelText: 'السعر (دج) - اختياري',
+              decoration: InputDecoration(
+                  labelText: t('السعر (دج) - اختياري', "Prix (DA) - facultatif"),
                   border: OutlineInputBorder()),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: note,
-              decoration: const InputDecoration(
-                  labelText: 'ملاحظة - اختياري', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                  labelText: t('ملاحظة - اختياري', "Remarque - facultatif"), border: OutlineInputBorder()),
             ),
             if (error != null)
               Padding(
@@ -998,7 +1072,7 @@ class _ServiceFormState extends State<ServiceForm> {
                 child: Text(error!, style: const TextStyle(color: Colors.red)),
               ),
             const SizedBox(height: 16),
-            FilledButton(onPressed: _save, child: const Text('حفظ')),
+            FilledButton(onPressed: _save, child: Text(t('حفظ', "Enregistrer"))),
           ],
         ),
       ),
@@ -1017,7 +1091,7 @@ class ItemDialog extends StatefulWidget {
 
 class _ItemDialogState extends State<ItemDialog> {
   late final TextEditingController name =
-      TextEditingController(text: widget.item?.name ?? '');
+      TextEditingController(text: widget.item?.label ?? '');
   late final TextEditingController km = TextEditingController(
       text: widget.item == null ? '' : widget.item!.intervalKm.toString());
   late final TextEditingController months = TextEditingController(
@@ -1037,15 +1111,15 @@ class _ItemDialogState extends State<ItemDialog> {
     final k = km.text.trim().isEmpty ? 0 : parseInt(km.text.trim());
     final m = months.text.trim().isEmpty ? 0 : parseInt(months.text.trim());
     if (n.isEmpty) {
-      setState(() => error = 'أدخل اسم البند');
+      setState(() => error = t('أدخل اسم البند', "Saisissez le nom de l'élément"));
       return;
     }
     if (k == null || m == null || k < 0 || m < 0) {
-      setState(() => error = 'أدخل أرقاماً صحيحة');
+      setState(() => error = t('أدخل أرقاماً صحيحة', "Saisissez des nombres valides"));
       return;
     }
     if (k == 0 && m == 0) {
-      setState(() => error = 'حدّد فاصلاً بالكيلومتر أو بالأشهر');
+      setState(() => error = t('حدّد فاصلاً بالكيلومتر أو بالأشهر', "Définissez un intervalle en km ou en mois"));
       return;
     }
     final it = widget.item;
@@ -1068,26 +1142,26 @@ class _ItemDialogState extends State<ItemDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.item == null ? 'بند جديد' : 'تعديل البند'),
+      title: Text(widget.item == null ? t('بند جديد', "Nouvel élément") : t('تعديل البند', "Modifier l'élément")),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: name,
-              decoration: const InputDecoration(labelText: 'الاسم'),
+              decoration: InputDecoration(labelText: t('الاسم', "Nom")),
             ),
             TextField(
               controller: km,
               keyboardType: TextInputType.number,
               decoration:
-                  const InputDecoration(labelText: 'كل كم كيلومتر (0 = بدون)'),
+                  InputDecoration(labelText: t('كل كم كيلومتر (0 = بدون)', "Tous les combien de km (0 = aucun)")),
             ),
             TextField(
               controller: months,
               keyboardType: TextInputType.number,
               decoration:
-                  const InputDecoration(labelText: 'كل كم شهر (0 = بدون)'),
+                  InputDecoration(labelText: t('كل كم شهر (0 = بدون)', "Tous les combien de mois (0 = aucun)")),
             ),
             if (error != null)
               Padding(
@@ -1100,8 +1174,8 @@ class _ItemDialogState extends State<ItemDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء')),
-        FilledButton(onPressed: _save, child: const Text('حفظ')),
+            child: Text(t('إلغاء', "Annuler"))),
+        FilledButton(onPressed: _save, child: Text(t('حفظ', "Enregistrer"))),
       ],
     );
   }
@@ -1119,7 +1193,7 @@ class CarDialog extends StatefulWidget {
 
 class _CarDialogState extends State<CarDialog> {
   late final TextEditingController name = TextEditingController(
-      text: widget.car?.name ?? 'سيارة ${widget.store.cars.length + 1}');
+      text: widget.car?.label ?? t('سيارة ${widget.store.cars.length + 1}', "Voiture ${widget.store.cars.length + 1}"));
   late final TextEditingController km =
       TextEditingController(text: (widget.car?.km ?? 0).toString());
   late final TextEditingController price = TextEditingController(
@@ -1139,18 +1213,18 @@ class _CarDialogState extends State<CarDialog> {
   void _save() {
     final k = parseInt(km.text.trim());
     if (k == null || k < 0) {
-      setState(() => error = 'أدخل العداد بأرقام صحيحة');
+      setState(() => error = t('أدخل العداد بأرقام صحيحة', "Saisissez un kilométrage valide"));
       return;
     }
     double? p;
     if (price.text.trim().isNotEmpty) {
       p = parseDouble(price.text.trim());
       if (p == null || p < 0) {
-        setState(() => error = 'سعر الشراء غير صحيح');
+        setState(() => error = t('سعر الشراء غير صحيح', "Prix d'achat invalide"));
         return;
       }
     }
-    final n = name.text.trim().isEmpty ? 'سيارتي' : name.text.trim();
+    final n = name.text.trim().isEmpty ? t('سيارتي', "Ma voiture") : name.text.trim();
     final c = widget.car;
     if (c == null) {
       widget.store.addCar(n, k, p);
@@ -1164,28 +1238,28 @@ class _CarDialogState extends State<CarDialog> {
   Widget build(BuildContext context) {
     final c = widget.car;
     return AlertDialog(
-      title: Text(c == null ? 'سيارة جديدة' : 'بيانات السيارة'),
+      title: Text(c == null ? t('سيارة جديدة', "Nouvelle voiture") : t('بيانات السيارة', "Données de la voiture")),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: name,
-              decoration: const InputDecoration(
-                  labelText: 'اسم السيارة (مثال: كليو 2018)'),
+              decoration: InputDecoration(
+                  labelText: t('اسم السيارة (مثال: كليو 2018)', "Nom de la voiture (ex. : Clio 2018)")),
             ),
             TextField(
               controller: km,
               keyboardType: TextInputType.number,
               decoration:
-                  const InputDecoration(labelText: 'العداد الحالي (كم)'),
+                  InputDecoration(labelText: t('العداد الحالي (كم)', "Compteur actuel (km)")),
             ),
             TextField(
               controller: price,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                  labelText: 'ثمن الشراء (دج) - اختياري'),
+              decoration: InputDecoration(
+                  labelText: t('ثمن الشراء (دج) - اختياري', "Prix d'achat (DA) - facultatif")),
             ),
             if (error != null)
               Padding(
@@ -1200,17 +1274,17 @@ class _CarDialogState extends State<CarDialog> {
           TextButton(
             onPressed: () async {
               if (await confirm(
-                  context, 'حذف هذه السيارة وكل صيانتها نهائياً؟')) {
+                  context, t('حذف هذه السيارة وكل صيانتها نهائياً؟', "Supprimer définitivement cette voiture et tout son entretien ?"))) {
                 widget.store.deleteCar(c);
                 if (context.mounted) Navigator.pop(context);
               }
             },
-            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+            child: Text(t('حذف', "Supprimer"), style: TextStyle(color: Colors.red)),
           ),
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء')),
-        FilledButton(onPressed: _save, child: const Text('حفظ')),
+            child: Text(t('إلغاء', "Annuler"))),
+        FilledButton(onPressed: _save, child: Text(t('حفظ', "Enregistrer"))),
       ],
     );
   }
