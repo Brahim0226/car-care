@@ -16,6 +16,8 @@ dependencies:
   timezone: ^0.10.0
   pdf: ^3.11.0
   printing: ^5.13.0
+  # تثبيت إصدار image متوافق مع archive 4.0.9 (إصدار image 4.11 يستعمل دالة غير موجودة فيه)
+  image: '>=4.5.0 <4.6.0'
 
 dev_dependencies:
   flutter_test:
