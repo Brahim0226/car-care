@@ -1,0 +1,145 @@
+import 'dart:io';
+
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'l10n.dart';
+
+void _snack(BuildContext context, String msg) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+}
+
+/// يفتح تطبيق التقويم لإضافة موعد (يؤكد المستخدم الحفظ بنفسه)
+Future<void> addToCalendar(BuildContext context, String title, DateTime when) async {
+  try {
+    final start = DateTime(when.year, when.month, when.day, 9);
+    await AndroidIntent(
+      action: 'android.intent.action.INSERT',
+      data: 'content://com.android.calendar/events',
+      arguments: <String, dynamic>{
+        'title': title,
+        'beginTime': start.millisecondsSinceEpoch,
+        'endTime': start.add(const Duration(hours: 1)).millisecondsSinceEpoch,
+      },
+    ).launch();
+  } catch (_) {
+    _snack(context, t('لم أجد تطبيق تقويم في الهاتف', "Aucune application Agenda trouvée sur le téléphone"));
+  }
+}
+
+/// يبحث في الخرائط عن ورشة/محطة بنزين/محل قطع غيار قريب
+Future<void> searchNearby(BuildContext context, String query) async {
+  final q = Uri.encodeComponent(query);
+  try {
+    var ok = await launchUrl(Uri.parse('geo:0,0?q=$q'),
+        mode: LaunchMode.externalApplication);
+    if (!ok) {
+      ok = await launchUrl(
+          Uri.parse('https://www.google.com/maps/search/?api=1&query=$q'),
+          mode: LaunchMode.externalApplication);
+    }
+    if (!ok) _snack(context, t('تعذّر فتح الخرائط', "Impossible d'ouvrir les cartes"));
+  } catch (_) {
+    _snack(context, t('تعذّر فتح الخرائط', "Impossible d'ouvrir les cartes"));
+  }
+}
+
+void nearbyDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (ctx) => SimpleDialog(
+      title: Text(t('ابحث بالقرب منك', "Chercher près de vous")),
+      children: [
+        ListTile(
+          leading: const Icon(Icons.build_circle_outlined),
+          title: Text(t('ورشة ميكانيك', "Garage mécanique")),
+          onTap: () {
+            Navigator.pop(ctx);
+            searchNearby(context, t('ورشة ميكانيك', 'garage mécanique'));
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.local_gas_station),
+          title: Text(t('محطة وقود', "Station-service")),
+          onTap: () {
+            Navigator.pop(ctx);
+            searchNearby(context, t('محطة وقود', 'station-service'));
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.settings_suggest_outlined),
+          title: Text(t('محل قطع غيار', "Magasin de pièces auto")),
+          onTap: () {
+            Navigator.pop(ctx);
+            searchNearby(context, t('قطع غيار السيارات', 'pièces auto'));
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.local_car_wash),
+          title: Text(t('غسل السيارات', "Lavage auto")),
+          onTap: () {
+            Navigator.pop(ctx);
+            searchNearby(context, t('غسل السيارات', 'lavage auto'));
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+/// يلتقط/يختار صورة فاتورة وينسخها لمجلد التطبيق، ويرجع مسارها (أو null)
+Future<String?> pickInvoicePhoto(BuildContext context) async {
+  final source = await showModalBottomSheet<ImageSource>(
+    context: context,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera),
+            title: Text(t('التقاط صورة', "Prendre une photo")),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library),
+            title: Text(t('من المعرض', "Depuis la galerie")),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (source == null) return null;
+  try {
+    final x = await ImagePicker()
+        .pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+    if (x == null) return null;
+    final dir = await getApplicationDocumentsDirectory();
+    final folder = Directory('${dir.path}/invoices');
+    if (!await folder.exists()) await folder.create(recursive: true);
+    final dest = '${folder.path}/${DateTime.now().microsecondsSinceEpoch}.jpg';
+    await File(x.path).copy(dest);
+    return dest;
+  } catch (_) {
+    _snack(context, t('تعذّر الحصول على الصورة', "Impossible d'obtenir la photo"));
+    return null;
+  }
+}
+
+void showPhoto(BuildContext context, String path) {
+  final f = File(path);
+  if (!f.existsSync()) {
+    _snack(context, t('الصورة غير موجودة على هذا الهاتف', "La photo n'existe pas sur ce téléphone"));
+    return;
+  }
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      child: InteractiveViewer(child: Image.file(f)),
+    ),
+  );
+}

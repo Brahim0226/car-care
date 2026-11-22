@@ -5,9 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'extras.dart';
+import 'fuel.dart';
 import 'l10n.dart';
 import 'notifications.dart';
 import 'report.dart';
+import 'sync.dart';
 
 // ====================== أدوات مساعدة ======================
 
@@ -145,6 +148,7 @@ class Service {
   final int km;
   final double cost;
   final String note;
+  final String? photo;
 
   Service({
     required this.itemId,
@@ -152,6 +156,7 @@ class Service {
     required this.km,
     required this.cost,
     required this.note,
+    this.photo,
   });
 
   Map<String, dynamic> toJson() => {
@@ -160,6 +165,7 @@ class Service {
         'km': km,
         'cost': cost,
         'note': note,
+        'photo': photo,
       };
 
   factory Service.fromJson(Map<String, dynamic> j) => Service(
@@ -168,6 +174,7 @@ class Service {
         km: (j['km'] as num).toInt(),
         cost: (j['cost'] as num).toDouble(),
         note: j['note'] as String? ?? '',
+        photo: j['photo'] as String?,
       );
 }
 
@@ -213,6 +220,7 @@ class Car {
   double? purchasePrice;
   List<Item> items;
   List<Service> services;
+  List<FuelEntry> fuel;
 
   Car({
     required this.id,
@@ -221,8 +229,10 @@ class Car {
     this.purchasePrice,
     List<Item>? items,
     List<Service>? services,
+    List<FuelEntry>? fuel,
   })  : items = items ?? defaultItems(),
-        services = services ?? [];
+        services = services ?? [],
+        fuel = fuel ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -231,6 +241,7 @@ class Car {
         'purchasePrice': purchasePrice,
         'items': items.map((e) => e.toJson()).toList(),
         'services': services.map((e) => e.toJson()).toList(),
+        'fuel': fuel.map((e) => e.toJson()).toList(),
       };
 
   factory Car.fromJson(Map<String, dynamic> j) => Car(
@@ -243,6 +254,9 @@ class Car {
             .toList(),
         services: ((j['services'] as List?) ?? [])
             .map((e) => Service.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        fuel: ((j['fuel'] as List?) ?? [])
+            .map((e) => FuelEntry.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 
@@ -315,8 +329,16 @@ class Store extends ChangeNotifier {
   final SharedPreferences prefs;
   List<Car> cars = [];
   String currentId = '';
+  int modifiedAt = 0;
 
   Store(this.prefs);
+
+  bool get weeklyKm => prefs.getBool('weeklyKm') ?? false;
+
+  void setWeeklyKm(bool v) {
+    prefs.setBool('weeklyKm', v);
+    notifyListeners();
+  }
 
   static String newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
@@ -347,6 +369,7 @@ class Store extends ChangeNotifier {
   }
 
   void _parse(Map<String, dynamic> j) {
+    modifiedAt = (j['modifiedAt'] as num?)?.toInt() ?? 0;
     if (j['cars'] is List) {
       cars = (j['cars'] as List)
           .map((e) => Car.fromJson(e as Map<String, dynamic>))
@@ -373,11 +396,31 @@ class Store extends ChangeNotifier {
   Map<String, dynamic> _toJson() => {
         'cars': cars.map((c) => c.toJson()).toList(),
         'currentId': currentId,
+        'modifiedAt': modifiedAt,
       };
 
   void _save() {
+    modifiedAt = DateTime.now().millisecondsSinceEpoch;
     prefs.setString('data', jsonEncode(_toJson()));
     notifyListeners();
+  }
+
+  /// يطبّق نسخة قادمة من السحابة (بدون تغيير ختم التعديل)
+  void applyRemote(Map<String, dynamic> j) {
+    final oldCars = cars;
+    final oldId = currentId;
+    final oldStamp = modifiedAt;
+    try {
+      _parse(j);
+      if (cars.isEmpty) throw const FormatException('empty');
+      if (!cars.any((c) => c.id == currentId)) currentId = cars.first.id;
+      prefs.setString('data', jsonEncode(_toJson()));
+      notifyListeners();
+    } catch (_) {
+      cars = oldCars;
+      currentId = oldId;
+      modifiedAt = oldStamp;
+    }
   }
 
   void setLang(String code) {
@@ -473,6 +516,17 @@ class Store extends ChangeNotifier {
     car.services.remove(s);
     _save();
   }
+
+  void addFuel(FuelEntry e) {
+    car.fuel.add(e);
+    if (e.km > car.km) car.km = e.km;
+    _save();
+  }
+
+  void deleteFuel(FuelEntry e) {
+    car.fuel.remove(e);
+    _save();
+  }
 }
 
 // ====================== التطبيق ======================
@@ -480,7 +534,9 @@ class Store extends ChangeNotifier {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = await Store.load();
+  cloud = Cloud(store);
   runApp(CarApp(store: store));
+  if (cloud.loggedIn) cloud.syncNow();
   // التنبيهات تبدأ بعد عرض التطبيق (طلب الإذن لا يؤخر الفتح)
   Notifier.init().then((_) {
     Notifier.sync(store);
@@ -550,6 +606,27 @@ class _HomePageState extends State<HomePage> {
           context,
           MaterialPageRoute(builder: (_) => ReportPage(store: store)),
         );
+        break;
+      case 'fuel':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => FuelPage(store: store)),
+        );
+        break;
+      case 'cloud':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const CloudPage()),
+        );
+        break;
+      case 'nearby':
+        nearbyDialog(context);
+        break;
+      case 'weekly':
+        store.setWeeklyKm(!store.weeklyKm);
+        _snack(store.weeklyKm
+            ? t('سيذكّرك التطبيق كل أحد بتحديث العداد', "Un rappel chaque dimanche pour mettre à jour le compteur")
+            : t('أُلغي التذكير الأسبوعي', "Rappel hebdomadaire désactivé"));
         break;
       case 'backup':
         await Clipboard.setData(ClipboardData(text: store.exportJson()));
@@ -649,6 +726,14 @@ class _HomePageState extends State<HomePage> {
               PopupMenuButton<String>(
                 onSelected: _menu,
                 itemBuilder: (_) => [
+                  PopupMenuItem(value: 'fuel', child: Text(t('سجل الوقود', "Carburant"))),
+                  PopupMenuItem(value: 'nearby', child: Text(t('ورشة / محطة قريبة', "Garage / station proche"))),
+                  PopupMenuItem(value: 'cloud', child: Text(t('المزامنة السحابية', "Synchronisation cloud"))),
+                  PopupMenuItem(
+                      value: 'weekly',
+                      child: Text(store.weeklyKm
+                          ? t('✓ تذكير تحديث العداد (أسبوعي)', "✓ Rappel compteur (hebdo)")
+                          : t('تذكير تحديث العداد (أسبوعي)', "Rappel compteur (hebdo)"))),
                   const PopupMenuItem(value: 'lang', child: Text('اللغة / Langue')),
                   PopupMenuItem(value: 'backup', child: Text(t('نسخ احتياطي (نسخ البيانات)', "Sauvegarde (copier les données)"))),
                   PopupMenuItem(value: 'restore', child: Text(t('استعادة من نسخة', "Restaurer une sauvegarde"))),
@@ -797,6 +882,12 @@ Widget _serviceTile(BuildContext context, Store store, Service s) {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (s.cost > 0) Text(fmtMoney(s.cost)),
+          if (s.photo != null)
+            IconButton(
+              tooltip: t('الفاتورة', "Facture"),
+              icon: const Icon(Icons.receipt_long),
+              onPressed: () => showPhoto(context, s.photo!),
+            ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () async {
@@ -954,6 +1045,27 @@ class ItemPage extends StatelessWidget {
                 icon: const Icon(Icons.add_task),
                 label: Text(t('سجّل صيانة جديدة', "Enregistrer un entretien")),
               ),
+              if (last != null && it.intervalMonths > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: OutlinedButton.icon(
+                    onPressed: () => addToCalendar(
+                      context,
+                      t('صيانة: ${it.label} (${store.carName})', "Entretien : ${it.label} (${store.carName})"),
+                      DateTime(last.date.year, last.date.month + it.intervalMonths, last.date.day),
+                    ),
+                    icon: const Icon(Icons.event_available),
+                    label: Text(t('أضف الموعد القادم إلى التقويم', "Ajouter la prochaine échéance à l'agenda")),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: OutlinedButton.icon(
+                  onPressed: () => nearbyDialog(context),
+                  icon: const Icon(Icons.place_outlined),
+                  label: Text(t('ورشة أو محل قريب', "Garage ou magasin proche")),
+                ),
+              ),
               const SizedBox(height: 16),
               Text(t('السجل', "Historique"),
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -986,6 +1098,7 @@ class _ServiceFormState extends State<ServiceForm> {
   final TextEditingController note = TextEditingController();
   DateTime date = DateTime.now();
   String? error;
+  String? photo;
 
   @override
   void dispose() {
@@ -1022,6 +1135,7 @@ class _ServiceFormState extends State<ServiceForm> {
       km: k,
       cost: c,
       note: note.text.trim(),
+      photo: photo,
     ));
     Navigator.pop(context);
   }
@@ -1065,6 +1179,23 @@ class _ServiceFormState extends State<ServiceForm> {
               controller: note,
               decoration: InputDecoration(
                   labelText: t('ملاحظة - اختياري', "Remarque - facultatif"), border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final p = await pickInvoicePhoto(context);
+                      if (p != null && mounted) setState(() => photo = p);
+                    },
+                    icon: Icon(photo == null ? Icons.add_a_photo : Icons.check_circle),
+                    label: Text(photo == null
+                        ? t('صورة الفاتورة - اختياري', "Photo de la facture - facultatif")
+                        : t('تمت إضافة الصورة (اضغط للتغيير)', "Photo ajoutée (toucher pour changer)")),
+                  ),
+                ),
+              ],
             ),
             if (error != null)
               Padding(

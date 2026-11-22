@@ -110,6 +110,23 @@ class Notifier {
       }
     }
 
+    if (store.weeklyKm) {
+      final tzNow = tz.TZDateTime.now(tz.local);
+      var d = tz.TZDateTime(tz.local, tzNow.year, tzNow.month, tzNow.day, 10);
+      while (d.weekday != DateTime.sunday || !d.isAfter(tzNow)) {
+        d = d.add(const Duration(days: 1));
+      }
+      await _plugin.zonedSchedule(
+        9,
+        t('حدّث عدّاد سيارتك', "Mettez à jour le compteur"),
+        t('افتح التطبيق وسجّل العداد الحالي كي تبقى التنبيهات دقيقة', "Ouvrez l'application et saisissez le kilométrage actuel pour des alertes précises"),
+        d,
+        _details,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      );
+    }
+
     await _checkKm(store);
   }
 

@@ -99,7 +99,13 @@ def patch_gradle(app_dir):
     print("gradle: تم التعديل في", path)
 
 
-PERMISSIONS = """    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+PERMISSIONS = """    <uses-permission android:name="android.permission.INTERNET"/>
+    <queries>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="geo"/></intent>
+        <intent><action android:name="android.intent.action.INSERT"/><data android:mimeType="vnd.android.cursor.dir/event"/></intent>
+    </queries>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
 """
