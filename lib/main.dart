@@ -537,6 +537,7 @@ Future<void> main() async {
   cloud = Cloud(store);
   runApp(CarApp(store: store));
   if (cloud.loggedIn) cloud.syncNow();
+  pingInstall(store);
   // التنبيهات تبدأ بعد عرض التطبيق (طلب الإذن لا يؤخر الفتح)
   Notifier.init().then((_) {
     Notifier.sync(store);
@@ -638,6 +639,16 @@ class _HomePageState extends State<HomePage> {
       case 'lang':
         _langDialog();
         break;
+      case 'about':
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(t('حول التطبيق', "À propos")),
+            content: Text(t('صيانة سيارتي - الإصدار $appVersion\n\nيرسل التطبيق مرة في اليوم رقماً عشوائياً مجهولاً مع رقم الإصدار واللغة فقط، لنعرف عدد المستعملين. لا يُرسل أي اسم أو بيانات سيارة أو موقع.', "Mon entretien auto - version $appVersion\n\nUne fois par jour, l'application envoie un numéro aléatoire anonyme avec la version et la langue, uniquement pour compter les utilisateurs. Aucun nom, donnée de voiture ou position n'est envoyé.")),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+          ),
+        );
+        break;
       case 'test':
         final ok = await Notifier.test();
         _snack(ok
@@ -735,6 +746,7 @@ class _HomePageState extends State<HomePage> {
                           ? t('✓ تذكير تحديث العداد (أسبوعي)', "✓ Rappel compteur (hebdo)")
                           : t('تذكير تحديث العداد (أسبوعي)', "Rappel compteur (hebdo)"))),
                   const PopupMenuItem(value: 'lang', child: Text('اللغة / Langue')),
+                  PopupMenuItem(value: 'about', child: Text(t('حول التطبيق', "À propos"))),
                   PopupMenuItem(value: 'backup', child: Text(t('نسخ احتياطي (نسخ البيانات)', "Sauvegarde (copier les données)"))),
                   PopupMenuItem(value: 'restore', child: Text(t('استعادة من نسخة', "Restaurer une sauvegarde"))),
                   PopupMenuItem(value: 'test', child: Text(t('تجربة التنبيه', "Tester la notification"))),

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +11,32 @@ import 'main.dart';
 /// المزامنة السحابية عبر Supabase (حساب بريد + كلمة سر). نسخة واحدة لكل مستخدم،
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
+
+const appVersion = '1.3.0';
+
+/// عدّاد تثبيتات مجهول: رقم عشوائي + الإصدار + اللغة، مرة في اليوم كحد أقصى.
+/// لا يُرسل أي اسم أو بيانات سيارة.
+Future<void> pingInstall(Store store) async {
+  try {
+    final prefs = store.prefs;
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    if (prefs.getString('lastPing') == today) return;
+    var id = prefs.getString('installId');
+    if (id == null) {
+      final r = Random.secure();
+      id = List.generate(24, (_) => r.nextInt(16).toRadixString(16)).join();
+      await prefs.setString('installId', id);
+    }
+    final res = await http
+        .post(Uri.parse('${Cloud._url}/rest/v1/rpc/ping_install'),
+            headers: {'apikey': Cloud._key, 'Content-Type': 'application/json'},
+            body: jsonEncode({'p_id': id, 'p_version': appVersion, 'p_lang': Lang.code}))
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      await prefs.setString('lastPing', today);
+    }
+  } catch (_) {}
+}
 
 class Cloud extends ChangeNotifier {
   static const _url = 'https://jkwtqpxpksucouksvjwo.supabase.co';
