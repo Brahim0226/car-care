@@ -52,6 +52,21 @@ def add_signing(src, is_kts):
     return src
 
 
+def add_lint_off(src, is_kts):
+    """lintVital ينهار (خلل في أداة Lint) عند بناء release، وهو غير ضروري لبناء APK."""
+    if "checkReleaseBuilds" in src:
+        return src
+    blk = (
+        "\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }"
+        if is_kts
+        else "\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }"
+    )
+    src, n = re.subn(r"(\nandroid\s*\{)", r"\1" + blk.replace("\\", "\\\\"), src, count=1)
+    if n != 1:
+        sys.exit("لم أجد كتلة android لتعطيل lint")
+    return src
+
+
 def patch_gradle(app_dir):
     kts = os.path.join(app_dir, "build.gradle.kts")
     groovy = os.path.join(app_dir, "build.gradle")
@@ -93,6 +108,7 @@ def patch_gradle(app_dir):
         new_src += "\ndependencies {\n    %s\n}\n" % dep
 
     new_src = add_signing(new_src, is_kts)
+    new_src = add_lint_off(new_src, is_kts)
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(new_src)
