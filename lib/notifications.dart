@@ -110,6 +110,34 @@ class Notifier {
       }
     }
 
+    for (final car in store.cars) {
+      final tag = multi ? ' • ${car.label}' : '';
+      for (final d in car.docs) {
+        final day = DateTime(d.expiry.year, d.expiry.month, d.expiry.day, 9);
+        await _schedule(
+          id++,
+          t('تنتهي بعد شهر: ${d.label}$tag', "Expire dans 1 mois : ${d.label}$tag"),
+          t('تاريخ الانتهاء ${fmtDate(d.expiry)}', "Date d'expiration ${fmtDate(d.expiry)}"),
+          day.subtract(const Duration(days: 30)),
+          now,
+        );
+        await _schedule(
+          id++,
+          t('تنتهي بعد أسبوع: ${d.label}$tag', "Expire dans 1 semaine : ${d.label}$tag"),
+          t('تاريخ الانتهاء ${fmtDate(d.expiry)}', "Date d'expiration ${fmtDate(d.expiry)}"),
+          day.subtract(const Duration(days: 7)),
+          now,
+        );
+        await _schedule(
+          id++,
+          t('تنتهي اليوم: ${d.label}$tag', "Expire aujourd'hui : ${d.label}$tag"),
+          t('جدّد الوثيقة اليوم', "Pensez à renouveler le document"),
+          day,
+          now,
+        );
+      }
+    }
+
     if (store.weeklyKm) {
       final tzNow = tz.TZDateTime.now(tz.local);
       var d = tz.TZDateTime(tz.local, tzNow.year, tzNow.month, tzNow.day, 10);

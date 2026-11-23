@@ -5,6 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'charts.dart';
+import 'docs.dart';
+import 'backup.dart';
 import 'extras.dart';
 import 'fuel.dart';
 import 'l10n.dart';
@@ -221,6 +224,7 @@ class Car {
   List<Item> items;
   List<Service> services;
   List<FuelEntry> fuel;
+  List<CarDoc> docs;
 
   Car({
     required this.id,
@@ -230,9 +234,11 @@ class Car {
     List<Item>? items,
     List<Service>? services,
     List<FuelEntry>? fuel,
+    List<CarDoc>? docs,
   })  : items = items ?? defaultItems(),
         services = services ?? [],
-        fuel = fuel ?? [];
+        fuel = fuel ?? [],
+        docs = docs ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -242,6 +248,7 @@ class Car {
         'items': items.map((e) => e.toJson()).toList(),
         'services': services.map((e) => e.toJson()).toList(),
         'fuel': fuel.map((e) => e.toJson()).toList(),
+        'docs': docs.map((e) => e.toJson()).toList(),
       };
 
   factory Car.fromJson(Map<String, dynamic> j) => Car(
@@ -257,6 +264,9 @@ class Car {
             .toList(),
         fuel: ((j['fuel'] as List?) ?? [])
             .map((e) => FuelEntry.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        docs: ((j['docs'] as List?) ?? [])
+            .map((e) => CarDoc.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 
@@ -523,6 +533,16 @@ class Store extends ChangeNotifier {
     _save();
   }
 
+  void addDoc(CarDoc d) {
+    car.docs.add(d);
+    _save();
+  }
+
+  void deleteDoc(CarDoc d) {
+    car.docs.remove(d);
+    _save();
+  }
+
   void deleteFuel(FuelEntry e) {
     car.fuel.remove(e);
     _save();
@@ -613,6 +633,24 @@ class _HomePageState extends State<HomePage> {
           context,
           MaterialPageRoute(builder: (_) => FuelPage(store: store)),
         );
+        break;
+      case 'docs':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => DocsPage(store: store)),
+        );
+        break;
+      case 'charts':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ChartsPage(store: store)),
+        );
+        break;
+      case 'backupFile':
+        await shareBackupFile(context, store);
+        break;
+      case 'restoreFile':
+        await restoreBackupFile(context, store);
         break;
       case 'cloud':
         Navigator.push(
@@ -737,9 +775,11 @@ class _HomePageState extends State<HomePage> {
               PopupMenuButton<String>(
                 onSelected: _menu,
                 itemBuilder: (_) => [
+                  PopupMenuItem(value: 'docs', child: Text(t('وثائق السيارة', "Documents de la voiture"))),
+                  PopupMenuItem(value: 'charts', child: Text(t('رسوم بيانية', "Graphiques"))),
                   PopupMenuItem(value: 'fuel', child: Text(t('سجل الوقود', "Carburant"))),
                   PopupMenuItem(value: 'nearby', child: Text(t('ورشة / محطة قريبة', "Garage / station proche"))),
-                  PopupMenuItem(value: 'cloud', child: Text(t('المزامنة السحابية', "Synchronisation cloud"))),
+                  PopupMenuItem(value: 'cloud', child: Text(t('حسابي والمزامنة', "Mon compte et synchro"))),
                   PopupMenuItem(
                       value: 'weekly',
                       child: Text(store.weeklyKm
@@ -747,6 +787,8 @@ class _HomePageState extends State<HomePage> {
                           : t('تذكير تحديث العداد (أسبوعي)', "Rappel compteur (hebdo)"))),
                   const PopupMenuItem(value: 'lang', child: Text('اللغة / Langue')),
                   PopupMenuItem(value: 'about', child: Text(t('حول التطبيق', "À propos"))),
+                  PopupMenuItem(value: 'backupFile', child: Text(t('نسخة احتياطية كملف (مشاركة)', "Sauvegarde en fichier (partager)"))),
+                  PopupMenuItem(value: 'restoreFile', child: Text(t('استعادة من ملف', "Restaurer depuis un fichier"))),
                   PopupMenuItem(value: 'backup', child: Text(t('نسخ احتياطي (نسخ البيانات)', "Sauvegarde (copier les données)"))),
                   PopupMenuItem(value: 'restore', child: Text(t('استعادة من نسخة', "Restaurer une sauvegarde"))),
                   PopupMenuItem(value: 'test', child: Text(t('تجربة التنبيه', "Tester la notification"))),
@@ -1040,6 +1082,9 @@ class ItemPage extends StatelessWidget {
                       const SizedBox(height: 8),
                       Text(
                           t('الفاصل: ${intervals.isEmpty ? 'غير محدد' : intervals.join(' أو ')}', "Intervalle : ${intervals.isEmpty ? 'non défini' : intervals.join(' ou ')}")),
+                      if (store.car.predictedDate(it) != null)
+                        Text(
+                            t('التاريخ المتوقع (حسب استعمالك): ${fmtDate(store.car.predictedDate(it)!)}', "Date prévue (selon votre usage) : ${fmtDate(store.car.predictedDate(it)!)}")),
                       if (last != null)
                         Text(
                             t('آخر صيانة: ${fmtDate(last.date)} • ${fmt(last.km)} كم', "Dernier entretien : ${fmtDate(last.date)} • ${fmt(last.km)} km")),

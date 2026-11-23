@@ -12,7 +12,7 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.3.0';
+const appVersion = '1.4.0';
 
 /// عدّاد تثبيتات مجهول: رقم عشوائي + الإصدار + اللغة، مرة في اليوم كحد أقصى.
 /// لا يُرسل أي اسم أو بيانات سيارة.
@@ -142,6 +142,95 @@ class Cloud extends ChangeNotifier {
     }
   }
 
+  /// يرسل رسالة استرجاع كلمة المرور إلى البريد
+  Future<String?> sendReset(String email) async {
+    try {
+      final r = await http
+          .post(Uri.parse('$_url/auth/v1/recover'),
+              headers: _h(), body: jsonEncode({'email': email}))
+          .timeout(const Duration(seconds: 25));
+      if (r.statusCode != 200) return _err(r);
+      return null;
+    } catch (_) {
+      return t('لا يوجد اتصال بالإنترنت', "Pas de connexion Internet");
+    }
+  }
+
+  /// يقبل رابط الرسالة كاملاً أو رمزاً رقمياً، ثم يضبط كلمة السر الجديدة ويسجّل الدخول
+  Future<String?> resetWith(String input, String email, String newPass) async {
+    try {
+      final text = input.trim();
+      String? accessToken;
+      Map<String, dynamic>? body;
+      final m = RegExp(r'https?://\S+').firstMatch(text);
+      if (m != null) {
+        final u = Uri.tryParse(m.group(0)!);
+        if (u != null) {
+          var frag = <String, String>{};
+          try {
+            frag = Uri.splitQueryString(u.fragment);
+          } catch (_) {}
+          final h = u.queryParameters['token_hash'] ?? u.queryParameters['token'];
+          if (frag['access_token'] != null) {
+            accessToken = frag['access_token'];
+          } else if (h != null) {
+            body = {'type': 'recovery', 'token_hash': h};
+          }
+        }
+      } else if (RegExp(r'^\d{6,8}$').hasMatch(text)) {
+        body = {'type': 'recovery', 'email': email, 'token': text};
+      }
+      if (accessToken == null) {
+        if (body == null) {
+          return t('الصق الرابط الذي وصلك بالبريد كاملاً أو الرمز الرقمي',
+              "Collez le lien complet reçu par e-mail ou le code numérique");
+        }
+        final r = await http
+            .post(Uri.parse('$_url/auth/v1/verify'),
+                headers: _h(), body: jsonEncode(body))
+            .timeout(const Duration(seconds: 25));
+        if (r.statusCode != 200) {
+          return t('الرابط أو الرمز غير صالح أو انتهت صلاحيته. اطلب رسالة جديدة.',
+              "Lien ou code invalide ou expiré. Demandez un nouvel e-mail.");
+        }
+        final j = jsonDecode(r.body) as Map<String, dynamic>;
+        accessToken = j['access_token'] as String?;
+        final s = _fromAuth(j, email);
+        if (s != null) _s = s;
+      }
+      if (accessToken == null) {
+        return t('رد غير متوقع من الخادم', "Réponse inattendue du serveur");
+      }
+      final u2 = await http
+          .put(Uri.parse('$_url/auth/v1/user'),
+              headers: _h(token: accessToken), body: jsonEncode({'password': newPass}))
+          .timeout(const Duration(seconds: 25));
+      if (u2.statusCode != 200) {
+        _s = null;
+        return _err(u2);
+      }
+      if (_s != null) _saveSession(_s);
+      return null;
+    } catch (_) {
+      return t('لا يوجد اتصال بالإنترنت', "Pas de connexion Internet");
+    }
+  }
+
+  Future<String?> changePassword(String newPass) async {
+    final tok = await _token();
+    if (tok == null) return t('انتهت الجلسة، سجّل الدخول من جديد', "Session expirée, reconnectez-vous");
+    try {
+      final r = await http
+          .put(Uri.parse('$_url/auth/v1/user'),
+              headers: _h(token: tok), body: jsonEncode({'password': newPass}))
+          .timeout(const Duration(seconds: 25));
+      if (r.statusCode != 200) return _err(r);
+      return null;
+    } catch (_) {
+      return t('لا يوجد اتصال بالإنترنت', "Pas de connexion Internet");
+    }
+  }
+
   void signOut() {
     _timer?.cancel();
     _saveSession(null);
@@ -261,6 +350,8 @@ class Cloud extends ChangeNotifier {
   }
 }
 
+enum _Mode { signIn, signUp, forgot, reset }
+
 class CloudPage extends StatefulWidget {
   const CloudPage({super.key});
 
@@ -271,38 +362,300 @@ class CloudPage extends StatefulWidget {
 class _CloudPageState extends State<CloudPage> {
   final email = TextEditingController();
   final pass = TextEditingController();
+  final pass2 = TextEditingController();
+  final code = TextEditingController();
+  _Mode mode = _Mode.signIn;
   String? msg;
+  bool ok = false;
   bool working = false;
+  bool hide = true;
 
   @override
   void dispose() {
     email.dispose();
     pass.dispose();
+    pass2.dispose();
+    code.dispose();
     super.dispose();
   }
 
-  Future<void> _go(bool create) async {
+  void _go(_Mode m) {
+    setState(() {
+      mode = m;
+      msg = null;
+      pass.clear();
+      pass2.clear();
+      code.clear();
+    });
+  }
+
+  bool _validEmail(String e) => RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(e);
+
+  void _fail(String m) => setState(() {
+        msg = m;
+        ok = false;
+      });
+
+  Future<void> _submit() async {
     final e = email.text.trim();
     final p = pass.text;
-    if (!e.contains('@') || p.length < 6) {
-      setState(() => msg = t('أدخل بريداً صحيحاً وكلمة سر من 6 أحرف على الأقل',
-          "Saisissez un e-mail valide et un mot de passe de 6 caractères minimum"));
+    if (!_validEmail(e)) {
+      _fail(t('أدخل بريداً إلكترونياً صحيحاً', "Saisissez un e-mail valide"));
+      return;
+    }
+    if (mode != _Mode.forgot && p.length < 6) {
+      _fail(t('كلمة السر 6 أحرف على الأقل', "Le mot de passe doit avoir au moins 6 caractères"));
+      return;
+    }
+    if ((mode == _Mode.signUp || mode == _Mode.reset) && p != pass2.text) {
+      _fail(t('كلمتا السر غير متطابقتين', "Les mots de passe ne correspondent pas"));
       return;
     }
     setState(() {
       working = true;
       msg = null;
     });
-    final err = create ? await cloud.signUp(e, p) : await cloud.signIn(e, p);
+    final cur = mode;
+    String? err;
+    String? info;
+    switch (cur) {
+      case _Mode.signIn:
+        err = await cloud.signIn(e, p);
+        break;
+      case _Mode.signUp:
+        err = await cloud.signUp(e, p);
+        if (err != null && !cloud.loggedIn && err.contains(t('تم إنشاء', 'Compte créé'))) {
+          info = err;
+          err = null;
+        }
+        break;
+      case _Mode.forgot:
+        err = await cloud.sendReset(e);
+        if (err == null) {
+          info = t('أُرسلت رسالة إلى بريدك. افتحها ثم انسخ الرابط (اضغط مطولاً على الزر ← نسخ عنوان الرابط) والصقه في الخطوة التالية.',
+              "Un e-mail a été envoyé. Ouvrez-le, copiez le lien (appui long sur le bouton → copier l'adresse du lien) et collez-le à l'étape suivante.");
+          _mode2(_Mode.reset);
+        }
+        break;
+      case _Mode.reset:
+        err = await cloud.resetWith(code.text, e, p);
+        if (err == null) {
+          info = t('تم تغيير كلمة السر', "Mot de passe modifié");
+        }
+        break;
+    }
     if (!mounted) return;
     setState(() {
       working = false;
-      msg = err;
+      msg = err ?? info;
+      ok = err == null;
     });
-    if (err == null && cloud.loggedIn) {
+    if (err == null && cloud.loggedIn && (cur == _Mode.signIn || cur == _Mode.signUp)) {
       final m = await cloud.syncNow();
       if (mounted) setState(() => msg = m);
+    } else if (err == null && cur == _Mode.reset) {
+      if (!cloud.loggedIn) {
+        _go(_Mode.signIn);
+        setState(() {
+          msg = info;
+          ok = true;
+        });
+      } else {
+        final m = await cloud.syncNow();
+        if (mounted) setState(() => msg = m);
+      }
     }
+  }
+
+  void _mode2(_Mode m) => mode = m;
+
+  Future<void> _changePassDialog() async {
+    final a = TextEditingController();
+    final b = TextEditingController();
+    String? err;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text(t('تغيير كلمة السر', "Changer le mot de passe")),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: a,
+                obscureText: true,
+                decoration: InputDecoration(labelText: t('كلمة السر الجديدة', "Nouveau mot de passe")),
+              ),
+              TextField(
+                controller: b,
+                obscureText: true,
+                decoration: InputDecoration(labelText: t('أعد كتابتها', "Confirmer")),
+              ),
+              if (err != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(err!, style: const TextStyle(color: Colors.red)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('إلغاء', "Annuler"))),
+            FilledButton(
+              onPressed: () async {
+                if (a.text.length < 6) {
+                  setD(() => err = t('كلمة السر 6 أحرف على الأقل', "Au moins 6 caractères"));
+                  return;
+                }
+                if (a.text != b.text) {
+                  setD(() => err = t('كلمتا السر غير متطابقتين', "Les mots de passe ne correspondent pas"));
+                  return;
+                }
+                final r = await cloud.changePassword(a.text);
+                if (r != null) {
+                  setD(() => err = r);
+                  return;
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (mounted) {
+                  setState(() {
+                    msg = t('تم تغيير كلمة السر', "Mot de passe modifié");
+                    ok = true;
+                  });
+                }
+              },
+              child: Text(t('حفظ', "Enregistrer")),
+            ),
+          ],
+        ),
+      ),
+    );
+    a.dispose();
+    b.dispose();
+  }
+
+  Widget _field(TextEditingController c, String label,
+      {bool secret = false, TextInputType? type, int lines = 1}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: c,
+        obscureText: secret && hide,
+        keyboardType: type,
+        maxLines: secret ? 1 : lines,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: secret
+              ? IconButton(
+                  icon: Icon(hide ? Icons.visibility : Icons.visibility_off),
+                  onPressed: () => setState(() => hide = !hide),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+
+  String get _title {
+    switch (mode) {
+      case _Mode.signIn:
+        return t('تسجيل الدخول', "Connexion");
+      case _Mode.signUp:
+        return t('إنشاء حساب جديد', "Créer un compte");
+      case _Mode.forgot:
+        return t('نسيت كلمة السر', "Mot de passe oublié");
+      case _Mode.reset:
+        return t('كلمة سر جديدة', "Nouveau mot de passe");
+    }
+  }
+
+  String get _action {
+    switch (mode) {
+      case _Mode.signIn:
+        return t('دخول', "Se connecter");
+      case _Mode.signUp:
+        return t('إنشاء الحساب', "Créer le compte");
+      case _Mode.forgot:
+        return t('أرسل رسالة الاسترجاع', "Envoyer l'e-mail");
+      case _Mode.reset:
+        return t('حفظ كلمة السر الجديدة', "Enregistrer le mot de passe");
+    }
+  }
+
+  List<Widget> _form() {
+    return [
+      Text(_title, style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 12),
+      if (mode == _Mode.forgot)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(t('اكتب بريدك وسنرسل لك رسالة لتعيين كلمة سر جديدة.',
+              "Saisissez votre e-mail : nous vous enverrons un message pour définir un nouveau mot de passe.")),
+        ),
+      _field(email, t('البريد الإلكتروني', "E-mail"), type: TextInputType.emailAddress),
+      if (mode == _Mode.reset) ...[
+        _field(code, t('الصق هنا الرابط الذي وصلك بالبريد (أو الرمز الرقمي)', "Collez ici le lien reçu par e-mail (ou le code)"), lines: 3),
+        _field(pass, t('كلمة السر الجديدة', "Nouveau mot de passe"), secret: true),
+        _field(pass2, t('أعد كتابة كلمة السر', "Confirmer le mot de passe"), secret: true),
+      ] else if (mode != _Mode.forgot) ...[
+        _field(pass, t('كلمة السر', "Mot de passe"), secret: true),
+        if (mode == _Mode.signUp)
+          _field(pass2, t('أعد كتابة كلمة السر', "Confirmer le mot de passe"), secret: true),
+      ],
+      FilledButton(onPressed: working ? null : _submit, child: Text(_action)),
+      const SizedBox(height: 8),
+      if (mode == _Mode.signIn) ...[
+        TextButton(onPressed: () => _go(_Mode.forgot), child: Text(t('نسيت كلمة السر؟', "Mot de passe oublié ?"))),
+        OutlinedButton(onPressed: () => _go(_Mode.signUp), child: Text(t('ليس عندي حساب: إنشاء حساب', "Pas de compte : en créer un"))),
+      ] else ...[
+        if (mode == _Mode.forgot)
+          TextButton(onPressed: () => _go(_Mode.reset), child: Text(t('وصلتني الرسالة بالفعل', "J'ai déjà reçu l'e-mail"))),
+        TextButton(onPressed: () => _go(_Mode.signIn), child: Text(t('رجوع إلى تسجيل الدخول', "Retour à la connexion"))),
+      ],
+    ];
+  }
+
+  List<Widget> _account() {
+    return [
+      Card(
+        child: ListTile(
+          leading: const Icon(Icons.account_circle, size: 36),
+          title: Text(cloud.email),
+          subtitle: Text(t('متصل', "Connecté")),
+        ),
+      ),
+      const SizedBox(height: 12),
+      FilledButton.icon(
+        onPressed: cloud.busy
+            ? null
+            : () async {
+                final m = await cloud.syncNow();
+                if (mounted) {
+                  setState(() {
+                    msg = m;
+                    ok = true;
+                  });
+                }
+              },
+        icon: const Icon(Icons.sync),
+        label: Text(t('مزامنة الآن', "Synchroniser maintenant")),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: _changePassDialog,
+        icon: const Icon(Icons.lock_reset),
+        label: Text(t('تغيير كلمة السر', "Changer le mot de passe")),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () {
+          cloud.signOut();
+          _go(_Mode.signIn);
+        },
+        icon: const Icon(Icons.logout),
+        label: Text(t('تسجيل الخروج', "Se déconnecter")),
+      ),
+    ];
   }
 
   @override
@@ -311,7 +664,7 @@ class _CloudPageState extends State<CloudPage> {
       listenable: cloud,
       builder: (context, _) {
         return Scaffold(
-          appBar: AppBar(title: Text(t('المزامنة السحابية', "Synchronisation cloud"))),
+          appBar: AppBar(title: Text(t('حسابي والمزامنة', "Mon compte et synchro"))),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -320,60 +673,7 @@ class _CloudPageState extends State<CloudPage> {
                     "Une copie de vos données est enregistrée dans votre compte sur le serveur Supabase, pour les retrouver si vous changez de téléphone. Les photos (factures) restent uniquement sur le téléphone."),
               ),
               const SizedBox(height: 16),
-              if (!cloud.loggedIn) ...[
-                TextField(
-                  controller: email,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(
-                      labelText: t('البريد الإلكتروني', "E-mail"),
-                      border: const OutlineInputBorder()),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: pass,
-                  obscureText: true,
-                  decoration: InputDecoration(
-                      labelText: t('كلمة السر', "Mot de passe"),
-                      border: const OutlineInputBorder()),
-                ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: working ? null : () => _go(false),
-                  child: Text(t('تسجيل الدخول', "Se connecter")),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: working ? null : () => _go(true),
-                  child: Text(t('إنشاء حساب جديد', "Créer un compte")),
-                ),
-              ] else ...[
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.cloud_done),
-                    title: Text(cloud.email),
-                    subtitle: Text(t('متصل', "Connecté")),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: cloud.busy
-                      ? null
-                      : () async {
-                          final m = await cloud.syncNow();
-                          if (mounted) setState(() => msg = m);
-                        },
-                  icon: const Icon(Icons.sync),
-                  label: Text(t('مزامنة الآن', "Synchroniser maintenant")),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: () {
-                    cloud.signOut();
-                    setState(() => msg = null);
-                  },
-                  child: Text(t('تسجيل الخروج', "Se déconnecter")),
-                ),
-              ],
+              ...(cloud.loggedIn ? _account() : _form()),
               if (working || cloud.busy)
                 const Padding(
                   padding: EdgeInsets.only(top: 16),
@@ -382,7 +682,7 @@ class _CloudPageState extends State<CloudPage> {
               if (msg != null && msg!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 16),
-                  child: Text(msg!),
+                  child: Text(msg!, style: TextStyle(color: ok ? Colors.green : Colors.red)),
                 ),
             ],
           ),

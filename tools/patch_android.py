@@ -156,9 +156,26 @@ def patch_manifest(path):
     print("manifest: تم التعديل")
 
 
+def copy_icons(root):
+    """يستبدل أيقونة Flutter الافتراضية بأيقونة التطبيق (مجلد android-res)."""
+    import shutil
+
+    src = os.path.join(root, "android-res")
+    dst = os.path.join(root, "android", "app", "src", "main", "res")
+    if not os.path.isdir(src):
+        print("icons: لا يوجد android-res")
+        return
+    for d in os.listdir(src):
+        f = os.path.join(src, d, "ic_launcher.png")
+        if os.path.isfile(f) and os.path.isdir(os.path.join(dst, d)):
+            shutil.copy(f, os.path.join(dst, d, "ic_launcher.png"))
+    print("icons: تم النسخ")
+
+
 if __name__ == "__main__":
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     patch_gradle(os.path.join(root, "android", "app"))
     patch_manifest(
         os.path.join(root, "android", "app", "src", "main", "AndroidManifest.xml")
     )
+    copy_icons(root)
