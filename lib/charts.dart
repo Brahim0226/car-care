@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'docs.dart';
 import 'l10n.dart';
 import 'main.dart';
 
