@@ -11,8 +11,10 @@ import sys
 DESUGAR = "com.android.tools:desugar_jdk_libs:2.1.4"
 
 
-STORE_PASS = "carcare2026"
-KEY_ALIAS = "carcare"
+STORE_PASS = os.environ.get("KEYSTORE_PASSWORD", "")
+KEY_ALIAS = os.environ.get("KEY_ALIAS", "carcare")
+if not STORE_PASS:
+    sys.exit("KEYSTORE_PASSWORD غير موجود: أضف الأسرار في GitHub (Settings > Secrets > Actions)")
 
 SIGN_KTS = """    signingConfigs {
         create("release") {

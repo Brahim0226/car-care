@@ -7,3 +7,6 @@ ios/
 .flutter-plugins
 .flutter-plugins-dependencies
 pubspec.lock
+release.keystore
+*.jks
+*.keystore

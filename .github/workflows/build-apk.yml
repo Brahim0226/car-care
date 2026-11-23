@@ -26,11 +26,16 @@ jobs:
 
       # نولّد مجلد android تلقائياً (ما يمسّش lib/main.dart ولا pubspec.yaml)
       - name: Generate Android project
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           flutter create --platforms=android --org com.example.carmaintenance --project-name car_maintenance .
           rm -rf test
           sed -i 's/android:label="[^"]*"/android:label="صيانة سيارتي"/' android/app/src/main/AndroidManifest.xml
-          cp release.keystore android/app/release.keystore
+          test -n "$KEYSTORE_BASE64" || { echo "السر KEYSTORE_BASE64 غير موجود"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
           python3 tools/patch_android.py .
 
       - run: flutter pub get
