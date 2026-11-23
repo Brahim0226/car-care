@@ -12,7 +12,22 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.4.0';
+const appVersion = '1.4.1';
+
+/// إحصائيات المشرف (تتطلب رمز المشرف، يتحقق منه الخادم)
+Future<Map<String, dynamic>?> fetchInstallStats(String code) async {
+  try {
+    final r = await http
+        .post(Uri.parse('${Cloud._url}/rest/v1/rpc/install_stats'),
+            headers: {'apikey': Cloud._key, 'Content-Type': 'application/json'},
+            body: jsonEncode({'p_code': code}))
+        .timeout(const Duration(seconds: 20));
+    if (r.statusCode != 200) return null;
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  } catch (_) {
+    return null;
+  }
+}
 
 /// عدّاد تثبيتات مجهول: رقم عشوائي + الإصدار + اللغة، مرة في اليوم كحد أقصى.
 /// لا يُرسل أي اسم أو بيانات سيارة.

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'charts.dart';
 import 'docs.dart';
+import 'admin.dart';
 import 'backup.dart';
 import 'extras.dart';
 import 'fuel.dart';
@@ -681,7 +682,13 @@ class _HomePageState extends State<HomePage> {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text(t('حول التطبيق', "À propos")),
+            title: GestureDetector(
+              onLongPress: () {
+                Navigator.pop(ctx);
+                adminEntry(context, store);
+              },
+              child: Text(t('حول التطبيق', "À propos")),
+            ),
             content: Text(t('صيانة سيارتي - الإصدار $appVersion\n\nيرسل التطبيق مرة في اليوم رقماً عشوائياً مجهولاً مع رقم الإصدار واللغة فقط، لنعرف عدد المستعملين. لا يُرسل أي اسم أو بيانات سيارة أو موقع.', "Mon entretien auto - version $appVersion\n\nUne fois par jour, l'application envoie un numéro aléatoire anonyme avec la version et la langue, uniquement pour compter les utilisateurs. Aucun nom, donnée de voiture ou position n'est envoyé.")),
             actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
           ),
