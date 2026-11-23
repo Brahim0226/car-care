@@ -50,3 +50,18 @@ Future<void> restoreBackupFile(BuildContext context, Store store) async {
     _snack(context, t('الملف غير صالح', "Fichier invalide"));
   }
 }
+
+/// يشارك رابط تحميل التطبيق مع الأصدقاء (نص عربي وفرنسي)
+Future<void> shareApp(BuildContext context) async {
+  const link = 'https://github.com/Brahim0226/car-care/releases/latest/download/car-care.apk';
+  try {
+    await Share.share(
+      'صيانة سيارتي: تطبيق مجاني يذكّرك بموعد الفيدانج والتأمين والمراقبة التقنية.\n'
+      'حمّله من هنا: $link\n\n'
+      "Mon Entretien Auto : application gratuite qui vous rappelle la vidange, l'assurance et le contrôle technique.\n"
+      'Télécharger : $link',
+    );
+  } catch (_) {
+    _snack(context, t('تعذّرت المشاركة', "Partage impossible"));
+  }
+}

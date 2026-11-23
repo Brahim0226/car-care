@@ -647,6 +647,9 @@ class _HomePageState extends State<HomePage> {
           MaterialPageRoute(builder: (_) => ChartsPage(store: store)),
         );
         break;
+      case 'share':
+        await shareApp(context);
+        break;
       case 'backupFile':
         await shareBackupFile(context, store);
         break;
@@ -793,6 +796,7 @@ class _HomePageState extends State<HomePage> {
                           ? t('✓ تذكير تحديث العداد (أسبوعي)', "✓ Rappel compteur (hebdo)")
                           : t('تذكير تحديث العداد (أسبوعي)', "Rappel compteur (hebdo)"))),
                   const PopupMenuItem(value: 'lang', child: Text('اللغة / Langue')),
+                  PopupMenuItem(value: 'share', child: Text(t('شارك التطبيق مع أصدقائك', "Partager l'application"))),
                   PopupMenuItem(value: 'about', child: Text(t('حول التطبيق', "À propos"))),
                   PopupMenuItem(value: 'backupFile', child: Text(t('نسخة احتياطية كملف (مشاركة)', "Sauvegarde en fichier (partager)"))),
                   PopupMenuItem(value: 'restoreFile', child: Text(t('استعادة من ملف', "Restaurer depuis un fichier"))),
