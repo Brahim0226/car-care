@@ -156,6 +156,53 @@ def patch_manifest(path):
     print("manifest: تم التعديل")
 
 
+ROOT_KTS = """
+// fixSdk36: بعض الإضافات مبنية على compileSdk أقدم من المطلوب في اعتمادياتها
+subprojects {
+    fun fixSdk(p: Project) {
+        val ext = p.extensions.findByName("android") ?: return
+        ext.javaClass.methods
+            .filter { it.name == "setCompileSdk" && it.parameterCount == 1 }
+            .forEach {
+                try {
+                    it.invoke(ext, 36)
+                } catch (e: Exception) {
+                }
+            }
+    }
+    if (state.executed) fixSdk(this) else afterEvaluate { fixSdk(this) }
+}
+"""
+
+ROOT_GROOVY = """
+// fixSdk36
+subprojects { p ->
+    def fix = {
+        if (p.hasProperty('android')) { p.android.compileSdk = 36 }
+    }
+    if (p.state.executed) { fix() } else { p.afterEvaluate { fix() } }
+}
+"""
+
+
+def patch_root(root):
+    kts = os.path.join(root, "android", "build.gradle.kts")
+    groovy = os.path.join(root, "android", "build.gradle")
+    if os.path.exists(kts):
+        path, add = kts, ROOT_KTS
+    elif os.path.exists(groovy):
+        path, add = groovy, ROOT_GROOVY
+    else:
+        sys.exit("لم يوجد android/build.gradle(.kts)")
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    if "fixSdk36" in src:
+        return
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(add)
+    print("root gradle: تم رفع compileSdk للإضافات في", path)
+
+
 def copy_icons(root):
     """يستبدل أيقونة Flutter الافتراضية بأيقونة التطبيق (مجلد android-res)."""
     import shutil
@@ -178,4 +225,5 @@ if __name__ == "__main__":
     patch_manifest(
         os.path.join(root, "android", "app", "src", "main", "AndroidManifest.xml")
     )
+    patch_root(root)
     copy_icons(root)
