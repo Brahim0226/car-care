@@ -6,6 +6,7 @@
 <title>صيانة سيارتي — Mon Entretien Auto</title>
 <meta name="description" content="تطبيق مجاني لمتابعة صيانة السيارة: تنبيهات الفيدانج والفلاتر والتأمين والمراقبة التقنية، يخدم بدون إنترنت.">
 <meta property="og:title" content="صيانة سيارتي">
+<meta property="og:image" content="https://brahim0226.github.io/car-care/img/s1.jpg">
 <meta property="og:description" content="لا تنسى موعد الفيدانج ولا التأمين ولا المراقبة التقنية. مجاني، عربي وفرنسي.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,6 +43,10 @@ section{padding-block:28px}
 .steps{counter-reset:s;display:grid;gap:12px;padding:0;list-style:none;margin:0}
 .steps li{counter-increment:s;background:var(--soft);border-radius:14px;padding:14px 18px 14px 18px;display:flex;gap:14px;align-items:flex-start}
 .steps li::before{content:counter(s);flex:none;width:30px;height:30px;border-radius:50%;background:var(--brand);color:var(--brand-fg);display:grid;place-items:center;font-weight:800}
+.shots{display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:12px;margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px)));padding-inline:max(16px,env(safe-area-inset-left,0px))}
+.shots figure{margin:0;flex:0 0 min(240px,70vw);scroll-snap-align:start}
+.shots img{width:100%;height:auto;display:block;border-radius:18px;border:1px solid var(--line);background:var(--card)}
+.shots figcaption{color:var(--muted);font-size:.9rem;margin-top:8px;text-align:center}
 details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:10px}
 summary{cursor:pointer;font-weight:600}
 details p{color:var(--muted);margin:8px 0 0}
@@ -85,6 +90,16 @@ html[data-lang="ar"] span[data-l="ar"],html[data-lang="fr"] span[data-l="fr"]{di
     <div class="card"><h3><span data-l="ar">سجل الوقود</span><span data-l="fr">Suivi carburant</span></h3><p><span data-l="ar">استهلاك ل/100كم وتكلفة الكيلومتر.</span><span data-l="fr">Consommation L/100 km et coût au km.</span></p></div>
     <div class="card"><h3><span data-l="ar">تقارير PDF</span><span data-l="fr">Rapports PDF</span></h3><p><span data-l="ar">تختار ما يظهر وتحسب المجموع، مفيدة عند بيع السيارة.</span><span data-l="fr">Vous choisissez le contenu et le total : utile pour la revente.</span></p></div>
     <div class="card"><h3><span data-l="ar">نسخة احتياطية ومزامنة</span><span data-l="fr">Sauvegarde et synchro</span></h3><p><span data-l="ar">ملف تحفظه أو حساب اختياري، فلا تضيع بياناتك.</span><span data-l="fr">Fichier à conserver ou compte facultatif : vos données ne se perdent pas.</span></p></div>
+  </div>
+</section>
+
+<section>
+  <h2><span data-l="ar">من داخل التطبيق</span><span data-l="fr">Dans l'application</span></h2>
+  <div class="shots">
+    <figure><img src="img/s1.jpg" width="480" height="1040" loading="lazy" alt=""><figcaption><span data-l="ar">بنود الصيانة</span><span data-l="fr">Postes d'entretien</span></figcaption></figure>
+    <figure><img src="img/s2.jpg" width="480" height="1040" loading="lazy" alt=""><figcaption><span data-l="ar">وثائق السيارة وتذكيرها</span><span data-l="fr">Documents et rappels</span></figcaption></figure>
+    <figure><img src="img/s3.jpg" width="480" height="1040" loading="lazy" alt=""><figcaption><span data-l="ar">تقرير PDF بما تختار</span><span data-l="fr">Rapport PDF sur mesure</span></figcaption></figure>
+    <figure><img src="img/s4.jpg" width="480" height="1040" loading="lazy" alt=""><figcaption><span data-l="ar">الوقود والرسوم والمزامنة</span><span data-l="fr">Carburant, graphiques, synchro</span></figcaption></figure>
   </div>
 </section>
 
