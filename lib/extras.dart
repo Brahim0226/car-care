@@ -6,7 +6,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'backup.dart';
 import 'l10n.dart';
+import 'main.dart';
+import 'sync.dart';
 
 void _snack(BuildContext context, String msg) {
   if (!context.mounted) return;
@@ -142,4 +145,68 @@ void showPhoto(BuildContext context, String path) {
       child: InteractiveViewer(child: Image.file(f)),
     ),
   );
+}
+
+const apkLink = 'https://github.com/Brahim0226/car-care/releases/latest/download/car-care.apk';
+
+/// عند فتح الشاشة الرئيسية: إشعار بإصدار جديد، أو (مرة واحدة بعد أسبوعين) دعوة للمشاركة
+Future<void> startupPrompts(BuildContext context, Store store) async {
+  try {
+    final prefs = store.prefs;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (prefs.getInt('firstRun') == null) await prefs.setInt('firstRun', now);
+
+    final last = prefs.getInt('lastUpdateCheck') ?? 0;
+    if (now - last > 6 * 3600 * 1000) {
+      await prefs.setInt('lastUpdateCheck', now);
+      final v = await checkNewVersion();
+      if (v != null && prefs.getString('updateShown') != v) {
+        await prefs.setString('updateShown', v);
+        if (!context.mounted) return;
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(t('إصدار جديد: $v', "Nouvelle version : $v")),
+            content: Text(t('يوجد تحديث للتطبيق. حمّله وثبّته فوق النسخة الحالية، وبياناتك تبقى.',
+                "Une mise à jour est disponible. Téléchargez-la et installez-la par-dessus : vos données restent.")),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('لاحقاً', "Plus tard"))),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  launchUrl(Uri.parse(apkLink), mode: LaunchMode.externalApplication);
+                },
+                child: Text(t('تحميل', "Télécharger")),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    }
+
+    final first = prefs.getInt('firstRun') ?? now;
+    if (now - first > 14 * 24 * 3600 * 1000 && !(prefs.getBool('sharePrompted') ?? false)) {
+      await prefs.setBool('sharePrompted', true);
+      if (!context.mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(t('أعجبك التطبيق؟', "Vous aimez l'application ?")),
+          content: Text(t('شاركه مع أصدقائك أصحاب السيارات، فيستفيدون مثلك.',
+              "Partagez-la avec vos amis automobilistes, ils en profiteront aussi.")),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('لاحقاً', "Plus tard"))),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                shareApp(context);
+              },
+              child: Text(t('شارك', "Partager")),
+            ),
+          ],
+        ),
+      );
+    }
+  } catch (_) {}
 }

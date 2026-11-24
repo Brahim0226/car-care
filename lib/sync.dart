@@ -12,7 +12,7 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.4.2';
+const appVersion = '1.5.0';
 
 /// إحصائيات المشرف (تتطلب رمز المشرف، يتحقق منه الخادم)
 Future<Map<String, dynamic>?> fetchInstallStats(String code) async {
@@ -24,6 +24,29 @@ Future<Map<String, dynamic>?> fetchInstallStats(String code) async {
         .timeout(const Duration(seconds: 20));
     if (r.statusCode != 200) return null;
     return jsonDecode(r.body) as Map<String, dynamic>;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// يرجع رقم الإصدار الأحدث إن كان أكبر من الحالي (من آخر Release في GitHub)، وإلا null
+Future<String?> checkNewVersion() async {
+  try {
+    final r = await http
+        .get(Uri.parse('https://api.github.com/repos/Brahim0226/car-care/releases/latest'),
+            headers: {'Accept': 'application/vnd.github+json'})
+        .timeout(const Duration(seconds: 12));
+    if (r.statusCode != 200) return null;
+    final name = (jsonDecode(r.body) as Map<String, dynamic>)['name'] as String? ?? '';
+    final m = RegExp(r'v(\d+)\.(\d+)\.(\d+)').firstMatch(name);
+    if (m == null) return null;
+    final latest = [for (var i = 1; i <= 3; i++) int.parse(m.group(i)!)];
+    final cur = appVersion.split('.').map(int.parse).toList();
+    for (var i = 0; i < 3; i++) {
+      if (latest[i] > cur[i]) return '${latest[0]}.${latest[1]}.${latest[2]}';
+      if (latest[i] < cur[i]) return null;
+    }
+    return null;
   } catch (_) {
     return null;
   }
