@@ -137,6 +137,7 @@ class Notifier {
         );
       }
     }
+    await _docCatchUp(store, now);
 
     if (store.weeklyKm) {
       final tzNow = tz.TZDateTime.now(tz.local);
@@ -156,6 +157,46 @@ class Notifier {
     }
 
     await _checkKm(store);
+  }
+
+  /// وثيقة سُجّلت وهي قريبة من الانتهاء (فاتت تنبيهات الشهر/الأسبوع): تنبيه فوري مرة واحدة
+  static Future<void> _docCatchUp(Store store, DateTime now) async {
+    Set<String> shown = {};
+    try {
+      shown = (jsonDecode(store.prefs.getString('docNotified') ?? '[]') as List)
+          .map((e) => e.toString())
+          .toSet();
+    } catch (_) {}
+    final today = DateTime(now.year, now.month, now.day);
+    final multi = store.cars.length > 1;
+    final next = <String>{};
+    var n = 0;
+    for (final car in store.cars) {
+      final tag = multi ? ' \u2022 ${car.label}' : '';
+      for (final d in car.docs) {
+        final e = DateTime(d.expiry.year, d.expiry.month, d.expiry.day);
+        final days = e.difference(today).inDays;
+        if (days > 30) continue;
+        final key = '${car.id}:${d.id}:${e.year}-${e.month}-${e.day}';
+        next.add(key);
+        if (shown.contains(key)) continue;
+        final String title;
+        final String body;
+        if (days < 0) {
+          title = t('انتهت: ${d.label}$tag', "Expiré : ${d.label}$tag");
+          body = t('انتهت منذ ${-days} يوم، جدّد الوثيقة', "Expiré depuis ${-days} jour(s), pensez à renouveler");
+        } else if (days == 0) {
+          title = t('تنتهي اليوم: ${d.label}$tag', "Expire aujourd'hui : ${d.label}$tag");
+          body = t('جدّد الوثيقة اليوم', "Pensez à renouveler le document");
+        } else {
+          title = t('تنتهي بعد $days يوم: ${d.label}$tag', "Expire dans $days jour(s) : ${d.label}$tag");
+          body = t('تاريخ الانتهاء ${fmtDate(d.expiry)}', "Date d'expiration ${fmtDate(d.expiry)}");
+        }
+        await _plugin.show(6000 + n, title, body, _details);
+        n++;
+      }
+    }
+    await store.prefs.setString('docNotified', jsonEncode(next.toList()));
   }
 
   static Future<void> _schedule(
