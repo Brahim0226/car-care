@@ -12,7 +12,7 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.7.0';
+const appVersion = '1.7.1';
 
 /// إحصائيات المشرف (تتطلب رمز المشرف، يتحقق منه الخادم)
 Future<Map<String, dynamic>?> fetchInstallStats(String code) async {
@@ -29,8 +29,31 @@ Future<Map<String, dynamic>?> fetchInstallStats(String code) async {
   }
 }
 
-/// يرجع رقم الإصدار الأحدث إن كان أكبر من الحالي (من آخر Release في GitHub)، وإلا null
-Future<String?> checkNewVersion() async {
+/// هل الإصدار latest أحدث من الإصدار الحالي؟
+bool isNewerVersion(String latest) {
+  try {
+    final l = latest.split('.').map(int.parse).toList();
+    final c = appVersion.split('.').map(int.parse).toList();
+    for (var i = 0; i < 3; i++) {
+      if (l[i] > c[i]) return true;
+      if (l[i] < c[i]) return false;
+    }
+  } catch (_) {}
+  return false;
+}
+
+/// آخر إصدار منشور: من ملف version.txt المرفق بالإصدار (لا يخضع لحدود واجهة GitHub)، ثم من الواجهة كاحتياط
+Future<String?> fetchLatestVersion() async {
+  final re = RegExp(r'(\d+)\.(\d+)\.(\d+)');
+  try {
+    final r = await http
+        .get(Uri.parse('https://github.com/Brahim0226/car-care/releases/latest/download/version.txt'))
+        .timeout(const Duration(seconds: 12));
+    if (r.statusCode == 200) {
+      final m = re.firstMatch(r.body);
+      if (m != null) return '${m.group(1)}.${m.group(2)}.${m.group(3)}';
+    }
+  } catch (_) {}
   try {
     final r = await http
         .get(Uri.parse('https://api.github.com/repos/Brahim0226/car-care/releases/latest'),
@@ -40,16 +63,17 @@ Future<String?> checkNewVersion() async {
     final name = (jsonDecode(r.body) as Map<String, dynamic>)['name'] as String? ?? '';
     final m = RegExp(r'v(\d+)\.(\d+)\.(\d+)').firstMatch(name);
     if (m == null) return null;
-    final latest = [for (var i = 1; i <= 3; i++) int.parse(m.group(i)!)];
-    final cur = appVersion.split('.').map(int.parse).toList();
-    for (var i = 0; i < 3; i++) {
-      if (latest[i] > cur[i]) return '${latest[0]}.${latest[1]}.${latest[2]}';
-      if (latest[i] < cur[i]) return null;
-    }
-    return null;
+    return '${m.group(1)}.${m.group(2)}.${m.group(3)}';
   } catch (_) {
     return null;
   }
+}
+
+/// يرجع رقم الإصدار الأحدث إن كان أكبر من الحالي، وإلا null
+Future<String?> checkNewVersion() async {
+  final v = await fetchLatestVersion();
+  if (v != null && isNewerVersion(v)) return v;
+  return null;
 }
 
 /// عدّاد تثبيتات مجهول: رقم عشوائي + الإصدار + اللغة، مرة في اليوم كحد أقصى.

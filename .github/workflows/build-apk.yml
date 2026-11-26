@@ -61,6 +61,7 @@ jobs:
         run: |
           cp build/app/outputs/flutter-apk/app-release.apk car-care.apk
           echo "VER=$(grep '^version:' pubspec.yaml | awk '{print $2}')" >> "$GITHUB_ENV"
+          grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1 > version.txt
 
       - name: Publish release (رابط تحميل للأصدقاء)
         if: github.ref == 'refs/heads/main'
@@ -72,7 +73,9 @@ jobs:
           body: |
             حمّل ملف car-care.apk وثبّته (فعّل التثبيت من مصادر غير معروفة إذا طُلب).
             التحديث يُثبَّت فوق النسخة القديمة بدون فقدان البيانات.
-          files: car-care.apk
+          files: |
+            car-care.apk
+            version.txt
           draft: false
           prerelease: false
           make_latest: true

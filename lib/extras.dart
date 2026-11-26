@@ -156,13 +156,26 @@ Future<void> startupPrompts(BuildContext context, Store store) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (prefs.getInt('firstRun') == null) await prefs.setInt('firstRun', now);
 
+    // نتيجة آخر فحص محفوظة، وتُجدَّد كل ساعة تقريباً
+    String? v = prefs.getString('newVer');
+    if (v != null && !isNewerVersion(v)) v = null;
     final last = prefs.getInt('lastUpdateCheck') ?? 0;
-    if (now - last > 6 * 3600 * 1000) {
-      await prefs.setInt('lastUpdateCheck', now);
-      final v = await checkNewVersion();
-      if (v != null && prefs.getString('updateShown') != v) {
+    if (now - last > 3600 * 1000) {
+      final fetched = await fetchLatestVersion();
+      if (fetched != null) {
+        await prefs.setInt('lastUpdateCheck', now);
+        v = isNewerVersion(fetched) ? fetched : null;
+        if (v == null) {
+          await prefs.remove('newVer');
+        } else {
+          await prefs.setString('newVer', v);
+        }
+      }
+    }
+    if (v != null) {
+      if (!context.mounted) return;
+      if (prefs.getString('updateShown') != v) {
         await prefs.setString('updateShown', v);
-        if (!context.mounted) return;
         await showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
@@ -181,8 +194,22 @@ Future<void> startupPrompts(BuildContext context, Store store) async {
             ],
           ),
         );
-        return;
       }
+      if (!context.mounted) return;
+      final sm = ScaffoldMessenger.of(context);
+      sm.hideCurrentMaterialBanner();
+      sm.showMaterialBanner(MaterialBanner(
+        content: Text(t('إصدار جديد $v متوفر', "Nouvelle version $v disponible")),
+        leading: const Icon(Icons.system_update),
+        actions: [
+          TextButton(
+            onPressed: () => launchUrl(Uri.parse(apkLink), mode: LaunchMode.externalApplication),
+            child: Text(t('تحميل', 'Télécharger')),
+          ),
+          TextButton(onPressed: sm.hideCurrentMaterialBanner, child: Text(t('إخفاء', 'Masquer'))),
+        ],
+      ));
+      return;
     }
 
     final first = prefs.getInt('firstRun') ?? now;
