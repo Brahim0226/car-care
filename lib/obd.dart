@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'dtc.dart';
 import 'l10n.dart';
+import 'license.dart';
 import 'main.dart';
 import 'sync.dart';
 
@@ -181,6 +183,117 @@ class _ObdPageState extends State<ObdPage> {
   List<String>? stored;
   List<String>? pending;
   Map<String, String> live = {};
+  License? lic;
+
+  Tier get tier => lic?.tier ?? Tier.none;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLic();
+  }
+
+  Future<void> _loadLic() async {
+    final l = await currentLicense(widget.store, widget.store.car.id);
+    if (mounted) setState(() => lic = l);
+  }
+
+  /// يتأكد من مستوى الاشتراك قبل تنفيذ ميزة، وإلا يعرض نافذة التفعيل
+  Future<bool> _need(Tier tr) async {
+    if (tier.index >= tr.index) return true;
+    final pro = tr == Tier.pro;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr == Tier.pro ? t('اشتراك كامل مطلوب', 'Abonnement complet requis') : t('اشتراك مطلوب', 'Abonnement requis')),
+        content: Text(pro
+            ? t('هذه الميزة (البيانات الحية، مسح الأعطال، جلب العداد) ضمن الاشتراك الكامل.',
+                "Cette fonction (données en direct, effacement des codes, compteur) fait partie de l'abonnement complet.")
+            : t('قراءة الأعطال ضمن الاشتراك الأساسي. يمكنك اختبار الاتصال مجاناً.',
+                "La lecture des défauts fait partie de l'abonnement de base. Vous pouvez tester la connexion gratuitement.")),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('إغلاق', 'Fermer'))),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _activateDialog();
+            },
+            child: Text(t('تفعيل', 'Activer')),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
+  Future<void> _activateDialog() async {
+    final car = widget.store.car;
+    final ctl = TextEditingController();
+    String err = '';
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text(t('تفعيل الاشتراك', "Activer l'abonnement")),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t('1) أرسل معرّف هذه السيارة للمطوّر:', "1) Envoyez l'identifiant de cette voiture au développeur :")),
+                const SizedBox(height: 6),
+                SelectableText(car.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Row(children: [
+                  TextButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: car.id));
+                      _msg(t('تم النسخ', 'Copié'));
+                    },
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: Text(t('نسخ', 'Copier')),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => Share.share('Car ID: ${car.id}\n${car.label}\nApp: $appVersion'),
+                    icon: const Icon(Icons.share, size: 18),
+                    label: Text(t('إرسال', 'Envoyer')),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                Text(t('2) ألصق الكود الذي تستلمه هنا:', '2) Collez ici le code reçu :')),
+                const SizedBox(height: 6),
+                TextField(controller: ctl, maxLines: 3, decoration: const InputDecoration(border: OutlineInputBorder())),
+                if (err.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(err, style: const TextStyle(color: Colors.red))),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('إلغاء', 'Annuler'))),
+            FilledButton(
+              onPressed: () async {
+                final l = await activateLicense(widget.store, car.id, ctl.text);
+                if (l == null) {
+                  setD(() => err = t('الكود غير صالح لهذه السيارة', 'Code invalide pour cette voiture'));
+                  return;
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+                await _loadLic();
+                _msg(t('تم تفعيل الاشتراك ✅', 'Abonnement activé ✅'));
+              },
+              child: Text(t('تفعيل', 'Activer')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _licText() {
+    final l = lic;
+    if (l == null) return t('غير مفعّل', 'Non activé');
+    final d = '${l.expiry.year}-${l.expiry.month.toString().padLeft(2, '0')}-${l.expiry.day.toString().padLeft(2, '0')}';
+    final name = l.tier == Tier.pro ? t('كامل', 'Complet') : t('أساسي', 'De base');
+    return t('$name حتى $d', '$name jusqu\'au $d');
+  }
 
   @override
   void dispose() {
@@ -253,6 +366,7 @@ class _ObdPageState extends State<ObdPage> {
   }
 
   Future<void> _readDtcs() async {
+    if (!await _need(Tier.basic)) return;
     setState(() => busy = true);
     try {
       final s = await elm.storedDtcs();
@@ -269,6 +383,7 @@ class _ObdPageState extends State<ObdPage> {
   }
 
   Future<void> _clear() async {
+    if (!await _need(Tier.pro)) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -294,6 +409,7 @@ class _ObdPageState extends State<ObdPage> {
   }
 
   Future<void> _readLive() async {
+    if (!await _need(Tier.pro)) return;
     setState(() => busy = true);
     final m = <String, String>{};
     try {
@@ -319,6 +435,7 @@ class _ObdPageState extends State<ObdPage> {
   }
 
   Future<void> _readOdo() async {
+    if (!await _need(Tier.pro)) return;
     setState(() => busy = true);
     try {
       final d = await elm.pid('A6');
@@ -389,6 +506,16 @@ class _ObdPageState extends State<ObdPage> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            Card(
+              child: ListTile(
+                leading: Icon(lic == null ? Icons.lock_outline : Icons.verified, color: lic == null ? null : Colors.green),
+                title: Text(t('الاشتراك: ', 'Abonnement : ') + _licText()),
+                subtitle: Text(t('أساسي: اتصال وقراءة الأعطال. كامل: + بيانات حية، مسح الأعطال، العداد.',
+                    "De base : connexion et lecture des défauts. Complet : + données en direct, effacement, compteur.")),
+                trailing: FilledButton.tonal(onPressed: _activateDialog, child: Text(t('تفعيل', 'Activer'))),
+              ),
+            ),
+            const SizedBox(height: 8),
             Text(t(
                 'ركّب محوّل ELM327 (بلوتوث) في فتحة OBD، وشغّل الاحتراق، ثم اقرنه من إعدادات البلوتوث في الهاتف. بعدها اضغط «عرض الأجهزة» واختره. القراءة تعمل دون إنترنت.',
                 "Branchez l'adaptateur ELM327 (Bluetooth) sur la prise OBD, mettez le contact, puis associez-le dans les réglages Bluetooth. Appuyez ensuite sur « Afficher les appareils » et choisissez-le. Fonctionne sans internet.")),
