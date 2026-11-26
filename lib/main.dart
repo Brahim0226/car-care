@@ -10,6 +10,7 @@ import 'docs.dart';
 import 'admin.dart';
 import 'backup.dart';
 import 'extras.dart';
+import 'obd.dart';
 import 'fuel.dart';
 import 'l10n.dart';
 import 'notifications.dart';
@@ -649,6 +650,12 @@ class _HomePageState extends State<HomePage> {
           MaterialPageRoute(builder: (_) => DocsPage(store: store)),
         );
         break;
+      case 'obd':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ObdPage(store: store)),
+        );
+        break;
       case 'charts':
         Navigator.push(
           context,
@@ -794,6 +801,7 @@ class _HomePageState extends State<HomePage> {
                 onSelected: _menu,
                 itemBuilder: (_) => [
                   PopupMenuItem(value: 'docs', child: Text(t('وثائق السيارة', "Documents de la voiture"))),
+                  PopupMenuItem(value: 'obd', child: Text(t('فحص السيارة (OBD)', "Diagnostic (OBD)"))),
                   PopupMenuItem(value: 'charts', child: Text(t('رسوم بيانية', "Graphiques"))),
                   PopupMenuItem(value: 'fuel', child: Text(t('سجل الوقود', "Carburant"))),
                   PopupMenuItem(value: 'nearby', child: Text(t('ورشة / محطة قريبة', "Garage / station proche"))),
