@@ -12,7 +12,7 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.6.1';
+const appVersion = '1.6.2';
 
 /// إحصائيات المشرف (تتطلب رمز المشرف، يتحقق منه الخادم)
 Future<Map<String, dynamic>?> fetchInstallStats(String code) async {

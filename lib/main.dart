@@ -11,6 +11,7 @@ import 'docs.dart';
 import 'admin.dart';
 import 'backup.dart';
 import 'extras.dart';
+import 'about_text.dart';
 import 'obd.dart';
 import 'fuel.dart';
 import 'l10n.dart';
@@ -708,7 +709,15 @@ class _HomePageState extends State<HomePage> {
               },
               child: Text(t('حول التطبيق', "À propos")),
             ),
-            content: Text(t('صيانة سيارتي - الإصدار $appVersion\n\nتطبيق مجاني، وبياناتك تبقى في هاتفك إلا إذا فعّلت المزامنة السحابية بنفسك.\nتفاصيل الخصوصية في الرابط أدناه.', "Mon entretien auto - version $appVersion\n\nApplication gratuite, vos données restent sur votre téléphone sauf si vous activez la synchronisation cloud.\nDétails de confidentialité via le lien ci-dessous.")),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Text(
+                  t('صيانة سيارتي - الإصدار $appVersion\n\n$aboutAr\n\nتطبيق مجاني. تفاصيل الخصوصية في الرابط أدناه.',
+                      "Mon entretien auto - version $appVersion\n\n$aboutFr\n\nApplication gratuite. Détails de confidentialité via le lien ci-dessous."),
+                ),
+              ),
+            ),
             actions: [
               TextButton(
                 onPressed: () => launchUrl(Uri.parse('https://brahim0226.github.io/car-care/privacy.html'), mode: LaunchMode.externalApplication),
