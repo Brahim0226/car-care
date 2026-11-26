@@ -162,6 +162,8 @@ Future<void> startupPrompts(BuildContext context, Store store) async {
     final last = prefs.getInt('lastUpdateCheck') ?? 0;
     if (now - last > 3600 * 1000) {
       final fetched = await fetchLatestVersion();
+      await prefs.setString('updDiag',
+          '${DateTime.now().toIso8601String().substring(0, 16)} → ${fetched ?? 'فشل'} (${updateDiag})');
       if (fetched != null) {
         await prefs.setInt('lastUpdateCheck', now);
         v = isNewerVersion(fetched) ? fetched : null;

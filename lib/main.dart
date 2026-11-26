@@ -714,7 +714,8 @@ class _HomePageState extends State<HomePage> {
               child: SingleChildScrollView(
                 child: Text(
                   t('صيانة سيارتي - الإصدار $appVersion\n\n$aboutAr\n\nتطبيق مجاني. تفاصيل الخصوصية في الرابط أدناه.',
-                      "Mon entretien auto - version $appVersion\n\n$aboutFr\n\nApplication gratuite. Détails de confidentialité via le lien ci-dessous."),
+                      "Mon entretien auto - version $appVersion\n\n$aboutFr\n\nApplication gratuite. Détails de confidentialité via le lien ci-dessous") +
+                      '\n\n${t('آخر فحص للتحديث', 'Dernière vérification')}: ${store.prefs.getString('updDiag') ?? '—'}',
                 ),
               ),
             ),

@@ -12,7 +12,10 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.7.1';
+const appVersion = '1.7.2';
+
+/// نتيجة آخر فحص للتحديث (للتشخيص في «حول التطبيق»)
+String updateDiag = '';
 
 /// إحصائيات المشرف (تتطلب رمز المشرف، يتحقق منه الخادم)
 Future<Map<String, dynamic>?> fetchInstallStats(String code) async {
@@ -49,22 +52,27 @@ Future<String?> fetchLatestVersion() async {
     final r = await http
         .get(Uri.parse('https://github.com/Brahim0226/car-care/releases/latest/download/version.txt'))
         .timeout(const Duration(seconds: 12));
+    updateDiag = 'github ${r.statusCode}';
     if (r.statusCode == 200) {
       final m = re.firstMatch(r.body);
       if (m != null) return '${m.group(1)}.${m.group(2)}.${m.group(3)}';
     }
-  } catch (_) {}
+  } catch (e) {
+    updateDiag = 'github: ${e.toString().split('\n').first}';
+  }
   try {
     final r = await http
         .get(Uri.parse('https://api.github.com/repos/Brahim0226/car-care/releases/latest'),
             headers: {'Accept': 'application/vnd.github+json'})
         .timeout(const Duration(seconds: 12));
+    updateDiag += ' | api ${r.statusCode}';
     if (r.statusCode != 200) return null;
     final name = (jsonDecode(r.body) as Map<String, dynamic>)['name'] as String? ?? '';
     final m = RegExp(r'v(\d+)\.(\d+)\.(\d+)').firstMatch(name);
     if (m == null) return null;
     return '${m.group(1)}.${m.group(2)}.${m.group(3)}';
-  } catch (_) {
+  } catch (e) {
+    updateDiag += ' | api: ${e.toString().split('\n').first}';
     return null;
   }
 }
