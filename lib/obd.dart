@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'dtc.dart';
 import 'l10n.dart';
@@ -226,6 +227,16 @@ class _ObdPageState extends State<ObdPage> {
     return false;
   }
 
+  Future<void> _whatsapp(dynamic car, bool pro) async {
+    final tier = pro ? t('الكامل', 'Complet') : t('الأساسي', 'De base');
+    final msg = t(
+        'السلام عليكم، أريد اشتراك OBD ($tier).\nمعرّف السيارة: ${car.id}\nالسيارة: ${car.label}\nالتطبيق: $appVersion',
+        "Bonjour, je souhaite l'abonnement OBD ($tier).\nIdentifiant : ${car.id}\nVoiture : ${car.label}\nApp : $appVersion");
+    final ok = await launchUrl(Uri.parse('https://wa.me/213558494430?text=${Uri.encodeComponent(msg)}'),
+        mode: LaunchMode.externalApplication);
+    if (!ok) _msg(t('تعذّر فتح واتساب', "Impossible d'ouvrir WhatsApp"));
+  }
+
   Future<void> _activateDialog() async {
     final car = widget.store.car;
     final ctl = TextEditingController();
@@ -256,6 +267,18 @@ class _ObdPageState extends State<ObdPage> {
                     onPressed: () => Share.share('Car ID: ${car.id}\n${car.label}\nApp: $appVersion'),
                     icon: const Icon(Icons.share, size: 18),
                     label: Text(t('إرسال', 'Envoyer')),
+                  ),
+                ]),
+                Wrap(spacing: 8, children: [
+                  FilledButton.tonalIcon(
+                    onPressed: () => _whatsapp(car, false),
+                    icon: const Icon(Icons.chat, size: 18),
+                    label: Text(t('طلب «أساسي» (واتساب)', 'Demander « De base »')),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _whatsapp(car, true),
+                    icon: const Icon(Icons.chat, size: 18),
+                    label: Text(t('طلب «كامل» (واتساب)', 'Demander « Complet »')),
                   ),
                 ]),
                 const SizedBox(height: 8),
