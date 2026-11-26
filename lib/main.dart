@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'charts.dart';
 import 'docs.dart';
@@ -707,8 +708,14 @@ class _HomePageState extends State<HomePage> {
               },
               child: Text(t('حول التطبيق', "À propos")),
             ),
-            content: Text(t('صيانة سيارتي - الإصدار $appVersion\n\nيرسل التطبيق مرة في اليوم رقماً عشوائياً مجهولاً مع رقم الإصدار واللغة فقط، لنعرف عدد المستعملين. لا يُرسل أي اسم أو بيانات سيارة أو موقع.', "Mon entretien auto - version $appVersion\n\nUne fois par jour, l'application envoie un numéro aléatoire anonyme avec la version et la langue, uniquement pour compter les utilisateurs. Aucun nom, donnée de voiture ou position n'est envoyé.")),
-            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+            content: Text(t('صيانة سيارتي - الإصدار $appVersion\n\nتطبيق مجاني، وبياناتك تبقى في هاتفك إلا إذا فعّلت المزامنة السحابية بنفسك.\nتفاصيل الخصوصية في الرابط أدناه.', "Mon entretien auto - version $appVersion\n\nApplication gratuite, vos données restent sur votre téléphone sauf si vous activez la synchronisation cloud.\nDétails de confidentialité via le lien ci-dessous.")),
+            actions: [
+              TextButton(
+                onPressed: () => launchUrl(Uri.parse('https://brahim0226.github.io/car-care/privacy.html'), mode: LaunchMode.externalApplication),
+                child: Text(t('سياسة الخصوصية', 'Confidentialité')),
+              ),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+            ],
           ),
         );
         break;
