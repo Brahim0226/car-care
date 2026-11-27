@@ -1,3 +1,4 @@
+import 'dtc_extra.dart';
 import 'l10n.dart';
 
 /// شرح أكواد الأعطال الشائعة (عربي، فرنسي). تعمل دون إنترنت.
@@ -117,8 +118,10 @@ const Map<String, List<String>> _dtc = {
   'U0121': ['فقدان الاتصال مع وحدة ABS', "Communication perdue avec le calculateur ABS"],
 };
 
+bool dtcKnown(String code) => _dtc.containsKey(code) || dtcExtra.containsKey(code);
+
 String dtcExplain(String code) {
-  final e = _dtc[code];
+  final e = _dtc[code] ?? dtcExtra[code];
   if (e != null) return Lang.fr ? e[1] : e[0];
   final c = code.isNotEmpty ? code[0] : 'P';
   final manu = code.length > 1 && (code[1] == '1' || code[1] == '3');
@@ -128,11 +131,38 @@ String dtcExplain(String code) {
     'C': t('الهيكل السفلي (ABS، التعليق...)', 'Châssis (ABS, suspension...)'),
     'U': t('الاتصال بين الوحدات', 'Communication entre calculateurs'),
   }[c] ?? '';
+  // وصف تقريبي للمنظومة حسب مجال الرقم (أكواد P العامة)
+  String area = '';
+  if (c == 'P' && !manu && code.length == 5) {
+    final g = int.tryParse(code.substring(2, 3), radix: 16) ?? -1; // الرقم الثاني بعد P0/P2
+    final n = int.tryParse(code.substring(1, 4), radix: 16) ?? 0;
+    if (code[1] == '0' || code[1] == '2') {
+      if (n < 0x0A0) {
+        area = t('الوقود وتدفق الهواء', 'Carburant et débit d\'air');
+      } else if (n < 0x200) {
+        area = t('الوقود وتدفق الهواء', 'Carburant et débit d\'air');
+      } else if (n < 0x300) {
+        area = t('منظومة الحقن', 'Système d\'injection');
+      } else if (n < 0x400) {
+        area = t('الإشعال والاحتراق', 'Allumage et combustion');
+      } else if (n < 0x500) {
+        area = t('التحكم في الانبعاثات', 'Contrôle des émissions');
+      } else if (n < 0x600) {
+        area = t('السرعة والخمول والملحقات', 'Vitesse, ralenti et auxiliaires');
+      } else if (n < 0x700) {
+        area = t('كمبيوتر المحرك والدارات', 'Calculateur moteur et circuits');
+      } else if (n < 0xA00) {
+        area = t('ناقل الحركة', 'Transmission');
+      }
+    }
+    if (g < 0) area = '';
+  }
+  final areaTxt = area.isEmpty ? '' : t(' – المجال: $area', ' – Domaine : $area');
   return manu
-      ? t('كود خاص بالصانع ($sys). ابحث عنه باسم سيارتك وسنتها.',
-          "Code propre au constructeur ($sys). Cherchez-le avec le modèle et l'année de votre voiture.")
-      : t('كود عام لم يُدرج شرحه بعد ($sys). ابحث عنه على الإنترنت مع نوع سيارتك.',
-          "Code générique sans description pour l'instant ($sys). Cherchez-le en ligne avec votre modèle.");
+      ? t('كود خاص بالصانع ($sys). اضغط «بحث» لمعرفة معناه مع سيارتك.',
+          "Code propre au constructeur ($sys). Appuyez sur « Chercher » avec votre modèle.")
+      : t('كود عام ($sys)$areaTxt. شرحه غير مدرج بعد، اضغط «بحث».',
+          "Code générique ($sys)$areaTxt. Description non incluse, appuyez sur « Chercher ».");
 }
 
 

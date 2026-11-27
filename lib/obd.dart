@@ -172,11 +172,15 @@ class Elm {
     return null;
   }
 
+  bool isCan = false;
+
   List<String> _decodeDtcs(List<String> lines, String head) {
     final res = <String>[];
     for (final m in messages(lines)) {
       if (!m.startsWith(head)) continue;
-      final d = m.substring(head.length);
+      var d = m.substring(head.length);
+      // على بروتوكول CAN يسبق الأكواد بايت يحمل عددها
+      if (isCan && d.length >= 2) d = d.substring(2);
       for (var k = 0; k + 3 < d.length; k += 4) {
         final b1 = int.parse(d.substring(k, k + 2), radix: 16);
         final b2 = int.parse(d.substring(k + 2, k + 4), radix: 16);
@@ -192,7 +196,21 @@ class Elm {
     return res;
   }
 
-  Future<List<String>> storedDtcs() async => _decodeDtcs(await cmd('03', ms: 10000), '43');
+  Future<void> _detectProto() async {
+    try {
+      final l = await cmd('ATDPN');
+      var p = l.isEmpty ? '' : l.last.toUpperCase().trim();
+      if (p.length == 2 && p.startsWith('A')) p = p.substring(1); // A6 = تلقائي + بروتوكول 6
+      // البروتوكولات 6..9 وA..C هي CAN (ISO 15765)
+      isCan = RegExp(r'^[6-9A-C]$').hasMatch(p);
+      log.add('proto=$p can=$isCan');
+    } catch (_) {}
+  }
+
+  Future<List<String>> storedDtcs() async {
+    await _detectProto();
+    return _decodeDtcs(await cmd('03', ms: 10000), '43');
+  }
   Future<List<String>> pendingDtcs() async => _decodeDtcs(await cmd('07', ms: 10000), '47');
 
   Future<bool> clearDtcs() async {
@@ -462,6 +480,14 @@ class _ObdPageState extends State<ObdPage> {
         pending = p;
       });
       _logDtcs(s, p);
+      if (s.isEmpty && p.isEmpty) {
+        final d = await elm.pid('01');
+        final n = (d != null && d.isNotEmpty) ? (d[0] & 0x7F) : 0;
+        if (n > 0 && mounted) {
+          _msg(t('السيارة تُعلن عن $n أعطال لكنها لم تُرجع أكواداً. اضغط «نسخ معلوماتي» وأرسلها لي لأصلح القراءة.',
+              "La voiture signale $n défauts mais n'a renvoyé aucun code. Appuyez sur « Copier mes infos » et envoyez-les moi."));
+        }
+      }
     } catch (e) {
       _msg(t('فشلت القراءة: $e', 'Échec de lecture : $e'));
     }
@@ -756,6 +782,15 @@ class _ObdPageState extends State<ObdPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(dtcExplain(c)),
+                            if (!dtcKnown(c))
+                              TextButton.icon(
+                                style: TextButton.styleFrom(padding: EdgeInsets.zero, alignment: AlignmentDirectional.centerStart),
+                                onPressed: () => launchUrl(
+                                    Uri.parse('https://www.google.com/search?q=${Uri.encodeComponent('$c ${widget.store.car.label}')}'),
+                                    mode: LaunchMode.externalApplication),
+                                icon: const Icon(Icons.search, size: 18),
+                                label: Text(t('بحث عن هذا الكود', 'Chercher ce code')),
+                              ),
                             if (dtcItemHint(c) != null && widget.store.car.itemById(dtcItemHint(c)!) != null)
                               TextButton.icon(
                                 style: TextButton.styleFrom(padding: EdgeInsets.zero, alignment: AlignmentDirectional.centerStart),

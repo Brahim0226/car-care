@@ -12,7 +12,7 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.9.2';
+const appVersion = '1.9.3';
 
 /// نتيجة آخر فحص للتحديث (للتشخيص في «حول التطبيق»)
 String updateDiag = '';
