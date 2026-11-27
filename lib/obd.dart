@@ -538,8 +538,40 @@ class _ObdPageState extends State<ObdPage> {
       if (sp != null && sp.isNotEmpty) m[t('السرعة', 'Vitesse')] = '${sp[0]} km/h';
       final load = await elm.pid('04');
       if (load != null && load.isNotEmpty) m[t('حِمل المحرك', 'Charge moteur')] = '${(load[0] * 100 / 255).round()} %';
+      final iat = await elm.pid('0F');
+      if (iat != null && iat.isNotEmpty) m[t('حرارة هواء السحب', "Température d'air admission")] = '${iat[0] - 40} °C';
+      final thr = await elm.pid('11');
+      if (thr != null && thr.isNotEmpty) m[t('فتحة الخانق', 'Papillon')] = '${(thr[0] * 100 / 255).round()} %';
+      final stft = await elm.pid('06');
+      if (stft != null && stft.isNotEmpty) m[t('تصحيح الوقود القصير', 'Correction carburant (court terme)')] = '${((stft[0] - 128) * 100 / 128).toStringAsFixed(1)} %';
+      final mil = await elm.pid('01');
+      if (mil != null && mil.isNotEmpty) {
+        final on = (mil[0] & 0x80) != 0;
+        final n = mil[0] & 0x7F;
+        m[t('مصباح العطل', 'Voyant moteur')] = on ? t('مضاء ($n أعطال)', 'Allumé ($n défauts)') : t('مطفأ', 'Éteint');
+      }
       final v = await elm.cmd('ATRV');
-      if (v.isNotEmpty) m[t('جهد البطارية', 'Tension batterie')] = v.last;
+      if (v.isNotEmpty) {
+        final volts = double.tryParse(RegExp(r'[\d.]+').firstMatch(v.last)?.group(0) ?? '');
+        var note = '';
+        if (volts != null) {
+          final running = rpm != null && rpm.length >= 2 && (rpm[0] * 256 + rpm[1]) / 4 > 400;
+          if (running) {
+            note = volts < 13.0
+                ? t(' ⚠️ الشحن ضعيف', ' ⚠️ charge faible')
+                : volts > 14.9
+                    ? t(' ⚠️ مرتفع', ' ⚠️ élevée')
+                    : t(' ✅ الشحن سليم', ' ✅ charge OK');
+          } else {
+            note = volts < 11.8
+                ? t(' ⚠️ البطارية ضعيفة جداً', ' ⚠️ batterie très faible')
+                : volts < 12.4
+                    ? t(' ⚠️ ضعيفة', ' ⚠️ faible')
+                    : t(' ✅ جيدة', ' ✅ bonne');
+          }
+        }
+        m[t('جهد البطارية', 'Tension batterie')] = '${v.last}$note';
+      }
     } catch (e) {
       _msg('$e');
     }
