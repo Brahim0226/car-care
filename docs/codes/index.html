@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>أكواد OBD</title>
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#1565c0"><meta name="robots" content="noindex,nofollow">
+<style>
+body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f6f7fb;color:#1c1f2a}
+h1{font-size:1.3rem;margin:0 0 12px}.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 4px #0002}
+label{display:block;margin:10px 0 4px;font-weight:600}input,select,textarea,button{width:100%;box-sizing:border-box;font-size:1rem;padding:10px;border-radius:10px;border:1px solid #bbb;font-family:inherit}
+button{background:#1565c0;color:#fff;border:0;margin-top:10px}button.sec{background:#e3e8f5;color:#1c1f2a}button.wa{background:#1fa855}
+textarea{height:110px}#code{direction:ltr;font-family:monospace;font-size:.8rem}.warn{color:#b3261e;font-size:.85rem}
+.row{display:flex;gap:8px}.row>*{flex:1}small{color:#555}ul{padding:0;list-style:none;margin:0}li{padding:8px 0;border-bottom:1px solid #eee;font-size:.9rem}
+.due{color:#b3261e;font-weight:700}.ok{color:#1b7f3b}.gray{color:#777}
+
+.lock{max-width:420px;margin:8vh auto}
+</style></head><body>
+
+<div id="setup" class="card lock" hidden>
+<h1>إعداد أول مرة</h1>
+<p>هذه الصفحة لا تحتوي مفتاحك. ستحمّله مرة واحدة ثم يُحفظ <b>مشفّراً بكلمة سر</b> داخل هاتفك فقط.</p>
+<label>1) اختر ملف المولّد القديم (obd-code-generator.html) أو الصق المفتاح</label>
+<input type="file" id="kf" accept=".html,.json,.txt">
+<textarea id="kt" placeholder='أو الصق هنا: {"kty":"OKP","crv":"Ed25519","d":"...","x":"..."}' style="direction:ltr"></textarea>
+<label>2) كلمة سر جديدة لفتح التطبيق (6 أحرف فأكثر)</label>
+<input type="password" id="np" autocomplete="new-password">
+<button id="save">حفظ المفتاح مشفّراً</button>
+<p class="warn" id="serr"></p>
+</div>
+
+<div id="unlock" class="card lock" hidden>
+<h1>أكواد OBD 🔒</h1>
+<label>كلمة السر</label>
+<input type="password" id="pw" autocomplete="current-password">
+<button id="open">فتح</button>
+<p class="warn" id="uerr"></p>
+</div>
+
+<div id="app" hidden>
+<h1>مولّد أكواد اشتراك OBD</h1>
+<div class="card">
+<label>1) ألصق رسالة الزبون من واتساب (استخراج تلقائي)</label>
+<textarea id="msg" placeholder="الصق هنا..."></textarea>
+<button class="sec" id="parse">استخراج المعرّف والباقة</button>
+<small id="pinfo"></small>
+</div>
+<div class="card">
+<label>معرّف السيارة (Car ID)</label>
+<input id="car" inputmode="numeric">
+<label>المستوى</label>
+<select id="tier"><option value="1">أساسي (اتصال + قراءة الأعطال)</option><option value="2">كامل (+ بيانات حية + مسح + العداد)</option></select>
+<label>المدة</label>
+<select id="months"><option value="1">شهر</option><option value="3">3 أشهر</option><option value="6">6 أشهر</option><option value="12">سنة</option></select>
+<label>اسم الزبون / السيارة (يبقى في هاتفك فقط)</label>
+<input id="note" placeholder="مثال: أحمد - Corolla 2018">
+<label>رقم هاتف الزبون لإرسال الكود (اختياري، مثل 213555123456)</label>
+<input id="phone" inputmode="numeric">
+<button id="go">إنشاء الكود</button>
+</div>
+<div class="card" id="out" hidden>
+<b id="info"></b>
+<textarea id="code" readonly></textarea>
+<div class="row"><button class="sec" id="copy">نسخ الكود</button><button class="wa" id="wa">إرسال عبر واتساب</button></div>
+</div>
+<div class="card"><b>المشتركون</b> <small>(في هذا الهاتف فقط)</small>
+<ul id="subs"></ul>
+<div class="row"><button class="sec" id="exp">نسخ القائمة</button><button class="sec" id="imp">استيراد قائمة</button></div>
+</div>
+<div class="card row"><button class="sec" id="lockb">🔒 قفل الآن</button><button class="sec" id="forget">حذف المفتاح من الهاتف</button></div>
+</div>
+
+<script>
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+const EPOCH=Date.UTC(2020,0,1);
+let JWK=null,lockTimer=null;
+const $=id=>document.getElementById(id);
+const enc=new TextEncoder(),dec=new TextDecoder();
+const tob=a=>btoa(String.fromCharCode(...new Uint8Array(a)));
+const unb=s=>{const b=atob(s),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u};
+const b64u=a=>btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+
+async function kdf(pw,salt){
+  const k=await crypto.subtle.importKey('raw',enc.encode(pw),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},k,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encryptKey(jwk,pw){
+  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},await kdf(pw,salt),enc.encode(JSON.stringify(jwk)));
+  return JSON.stringify({s:tob(salt),i:tob(iv),c:tob(ct)});
+}
+async function decryptKey(blob,pw){
+  const o=JSON.parse(blob);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb(o.i)},await kdf(pw,unb(o.s)),unb(o.c));
+  return JSON.parse(dec.decode(pt));
+}
+function extractJwk(text){
+  let m=text.match(/const JWK=(\{[^}]*\})/);
+  const raw=m?m[1]:text.trim();
+  const j=JSON.parse(raw);
+  if(j.kty!=='OKP'||j.crv!=='Ed25519'||!j.d||!j.x)throw new Error('مفتاح غير صالح');
+  return {kty:j.kty,crv:j.crv,d:j.d,x:j.x};
+}
+async function makeCode(carId,tier,expiryDays){
+  const idb=enc.encode(carId);
+  const p=new Uint8Array(4+idb.length);
+  p[0]=1;p[1]=tier;p[2]=(expiryDays>>8)&255;p[3]=expiryDays&255;p.set(idb,4);
+  const key=await crypto.subtle.importKey('jwk',JWK,{name:'Ed25519'},false,['sign']);
+  const sig=new Uint8Array(await crypto.subtle.sign({name:'Ed25519'},key,p));
+  return 'CC1.'+b64u(p)+'.'+b64u(sig);
+}
+function expiryFor(months,now=new Date()){return new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+months,now.getUTCDate()))}
+function parseMsg(t){
+  t=t.replace(/[\u0660-\u0669]/g,d=>d.charCodeAt(0)-0x660);
+  let id=null;
+  const m=t.match(/(?:معرّف|معرف|identifiant|id)[^\d]{0,40}(\d{10,20})/i)||t.match(/(\d{13,20})/);
+  if(m)id=m[1];
+  let tier=null;
+  if(/كامل|complet/i.test(t))tier=2;else if(/أساسي|الأساسي|base/i.test(t))tier=1;
+  let car=null;const c=t.match(/^\s*(?:السيارة|voiture)\s*[:：]\s*(.+)/im);if(c)car=c[1].trim();
+  return{id,tier,car};
+}
+
+function show(which){['setup','unlock','app'].forEach(x=>$(x).hidden=x!==which)}
+function route(){show(JWK?'app':(localStorage.getItem('enc')?'unlock':'setup'));if(JWK)showSubs()}
+function lock(){JWK=null;$('pw').value='';$('code').value='';$('out').hidden=true;route()}
+function bump(){clearTimeout(lockTimer);if(JWK)lockTimer=setTimeout(lock,5*60*1000)}
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&JWK)lock()});
+['click','keydown','touchstart'].forEach(e=>document.addEventListener(e,bump,{passive:true}));
+
+$('kf').onchange=async e=>{const f=e.target.files[0];if(f)$('kt').value=await f.text()};
+$('save').onclick=async()=>{
+  $('serr').textContent='';
+  try{
+    const jwk=extractJwk($('kt').value);
+    const pw=$('np').value;
+    if(pw.length<6)throw new Error('كلمة السر قصيرة');
+    await crypto.subtle.importKey('jwk',jwk,{name:'Ed25519'},false,['sign']);
+    localStorage.setItem('enc',await encryptKey(jwk,pw));
+    $('kt').value='';$('np').value='';
+    JWK=jwk;bump();route();
+  }catch(e){$('serr').textContent=e.message||String(e)}
+};
+$('open').onclick=async()=>{
+  $('uerr').textContent='';
+  try{JWK=await decryptKey(localStorage.getItem('enc'),$('pw').value);$('pw').value='';bump();route()}
+  catch(e){$('uerr').textContent='كلمة السر خاطئة'}
+};
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('open').click()});
+$('lockb').onclick=lock;
+$('forget').onclick=()=>{if(confirm('حذف المفتاح من هذا الهاتف؟ تحتاج الملف القديم لإعادته.')){localStorage.removeItem('enc');lock()}};
+
+const rd=()=>{try{return JSON.parse(localStorage.getItem('subs')||'[]')}catch(e){return[]}};
+const wr=a=>localStorage.setItem('subs',JSON.stringify(a));
+const today=()=>new Date().toISOString().slice(0,10);
+const daysLeft=ds=>Math.round((Date.parse(ds)-Date.parse(today()))/86400000);
+function esc(x){return String(x||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function showSubs(){
+  const a=rd().sort((x,y)=>x.exp<y.exp?-1:1);
+  $('subs').innerHTML=a.map(x=>{
+    const d=daysLeft(x.exp);
+    const st=d<0?'<span class="due">منتهٍ منذ '+(-d)+' يوم</span>':d<=7?'<span class="due">ينتهي بعد '+d+' يوم ⚠️</span>':'<span class="ok">'+d+' يوم متبقٍ</span>';
+    return '<li><b>'+esc(x.note||x.car)+'</b> — '+(x.tier==2?'كامل':'أساسي')+'<br><small class="gray">'+esc(x.car)+'</small><br>'+esc(x.exp)+' · '+st+'</li>';
+  }).join('')||'<li>لا مشتركين بعد</li>';
+}
+$('parse').onclick=()=>{
+  const r=parseMsg($('msg').value);
+  if(r.id)$('car').value=r.id;
+  if(r.tier)$('tier').value=r.tier;
+  if(r.car&&!$('note').value)$('note').value=r.car;
+  $('pinfo').textContent=r.id?('المعرّف: '+r.id+' | الباقة: '+(r.tier==2?'كامل':r.tier==1?'أساسي':'غير محددة')):'لم أجد معرّفاً في الرسالة';
+};
+$('go').onclick=async()=>{
+  const car=$('car').value.trim();
+  if(!/^\d{10,20}$/.test(car)){alert('معرّف السيارة يجب أن يكون أرقاماً فقط');return}
+  const tier=+$('tier').value,m=+$('months').value;
+  const prev=rd().find(x=>x.car===car);
+  let base=new Date();
+  if(prev&&daysLeft(prev.exp)>0&&prev.tier===tier)base=new Date(prev.exp+'T00:00:00Z');
+  const exp=expiryFor(m,base);
+  const days=Math.round((exp.getTime()-EPOCH)/86400000);
+  let code;
+  try{code=await makeCode(car,tier,days)}catch(e){alert('تعذّر التوقيع. حدّث متصفح Chrome ثم أعد المحاولة.');return}
+  const ds=exp.toISOString().slice(0,10);
+  $('info').textContent=(tier==2?'كامل':'أساسي')+' حتى '+ds+' | سيارة '+car;
+  $('code').value=code;$('out').hidden=false;
+  const a=rd().filter(x=>x.car!==car);
+  a.push({car,tier,exp:ds,note:$('note').value.trim(),phone:$('phone').value.trim()});
+  wr(a);showSubs();
+};
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('code').value);$('copy').textContent='تم النسخ ✓'}catch(e){$('code').select()}};
+$('wa').onclick=()=>{
+  const until=$('info').textContent.split('حتى ')[1].split(' |')[0];
+  const txt='كود تفعيل اشتراك OBD (حتى '+until+'):\n'+$('code').value+'\n\nألصقه في: فحص OBD ← تفعيل ← خانة الكود.\nCode d\'activation OBD :\n'+$('code').value;
+  const ph=$('phone').value.replace(/\D/g,'');
+  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(txt),'_blank');
+};
+$('exp').onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(rd()));$('exp').textContent='تم النسخ ✓'}catch(e){}};
+$('imp').onclick=()=>{const t=prompt('ألصق قائمة المشتركين (JSON)');if(!t)return;try{const a=JSON.parse(t);if(Array.isArray(a)){wr(a);showSubs()}}catch(e){alert('نص غير صالح')}};
+route();
+</script></body></html>
