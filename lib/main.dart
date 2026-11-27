@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'charts.dart';
 import 'docs.dart';
 import 'expenses.dart';
+import 'home_widget_sync.dart';
 import 'admin.dart';
 import 'backup.dart';
 import 'extras.dart';
@@ -595,6 +596,8 @@ Future<void> main() async {
     Notifier.sync(store);
     store.addListener(() => Notifier.sync(store));
   });
+  updateHomeWidget(store);
+  store.addListener(() => updateHomeWidget(store));
 }
 
 class CarApp extends StatelessWidget {

@@ -146,7 +146,58 @@ RECEIVERS = """        <receiver android:exported="false" android:name="com.dext
 """
 
 
-def patch_manifest(path):
+def widget_package(root):
+    """يعيد (حزمة MainActivity, namespace) لتوليد مزوّد الودجت."""
+    import glob
+    import re
+
+    pkg = None
+    for f in glob.glob(os.path.join(root, "android", "app", "src", "main", "kotlin", "**", "MainActivity.kt"), recursive=True):
+        m = re.search(r"^package\s+([\w.]+)", open(f, encoding="utf-8").read(), re.M)
+        if m:
+            pkg = m.group(1)
+            kt_dir = os.path.dirname(f)
+            break
+    if not pkg:
+        return None
+    ns = pkg
+    for g in ("build.gradle.kts", "build.gradle"):
+        gp = os.path.join(root, "android", "app", g)
+        if os.path.exists(gp):
+            m = re.search(r"namespace\s*=?\s*[\"']([\w.]+)[\"']", open(gp, encoding="utf-8").read())
+            if m:
+                ns = m.group(1)
+    return pkg, ns, kt_dir
+
+
+def copy_widget(root):
+    """ينسخ ملفات الودجت (layout/xml/drawable + مزوّد Kotlin) إلى مشروع أندرويد."""
+    import shutil
+
+    src = os.path.join(root, "android-widget")
+    if not os.path.isdir(src):
+        print("widget: لا يوجد android-widget")
+        return None
+    info = widget_package(root)
+    if not info:
+        print("widget: لم أجد MainActivity.kt، تخطّي الودجت")
+        return None
+    pkg, ns, kt_dir = info
+    res = os.path.join(root, "android", "app", "src", "main", "res")
+    for sub in ("layout", "xml", "drawable"):
+        os.makedirs(os.path.join(res, sub), exist_ok=True)
+        d = os.path.join(src, "res", sub)
+        for f in os.listdir(d):
+            shutil.copy(os.path.join(d, f), os.path.join(res, sub, f))
+    tpl = open(os.path.join(src, "CarWidgetProvider.kt.tpl"), encoding="utf-8").read()
+    kt = tpl.replace("__PKG__", pkg).replace("__NS__", ns)
+    with open(os.path.join(kt_dir, "CarWidgetProvider.kt"), "w", encoding="utf-8") as f:
+        f.write(kt)
+    print("widget: تم النسخ، الحزمة", pkg, "namespace", ns)
+    return pkg
+
+
+def patch_manifest(path, widget_pkg=None):
     with open(path, encoding="utf-8") as f:
         src = f.read()
 
@@ -157,7 +208,17 @@ def patch_manifest(path):
         sys.exit("شكل AndroidManifest غير متوقع")
 
     src = src.replace("<application", PERMISSIONS + "    <application", 1)
-    src = src.replace("</application>", RECEIVERS + "    </application>", 1)
+    extra = ""
+    if widget_pkg:
+        extra = (
+            '        <receiver android:name="%s.CarWidgetProvider" android:exported="true">\n'
+            '            <intent-filter>\n'
+            '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+            '            </intent-filter>\n'
+            '            <meta-data android:name="android.appwidget.provider" android:resource="@xml/car_widget_info" />\n'
+            '        </receiver>\n'
+        ) % widget_pkg
+    src = src.replace("</application>", RECEIVERS + extra + "    </application>", 1)
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(src)
@@ -230,8 +291,9 @@ def copy_icons(root):
 if __name__ == "__main__":
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     patch_gradle(os.path.join(root, "android", "app"))
+    wpkg = copy_widget(root)
     patch_manifest(
-        os.path.join(root, "android", "app", "src", "main", "AndroidManifest.xml")
+        os.path.join(root, "android", "app", "src", "main", "AndroidManifest.xml"), wpkg
     )
     patch_root(root)
     copy_icons(root)
