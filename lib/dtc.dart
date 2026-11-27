@@ -134,3 +134,15 @@ String dtcExplain(String code) {
       : t('كود عام لم يُدرج شرحه بعد ($sys). ابحث عنه على الإنترنت مع نوع سيارتك.',
           "Code générique sans description pour l'instant ($sys). Cherchez-le en ligne avec votre modèle.");
 }
+
+
+/// بند صيانة مرتبط بالعطل (معرّف البند الافتراضي) أو null
+String? dtcItemHint(String code) {
+  final c = code.toUpperCase();
+  if (RegExp(r'^P030\d$').hasMatch(c)) return 'spark';
+  if (RegExp(r'^P01(00|01|02|03|04)$').hasMatch(c) || c == 'P0171' || c == 'P0174' || c == 'P0172' || c == 'P0175') return 'air_filter';
+  if (c == 'P0560' || c == 'P0562' || c == 'P0563') return 'battery';
+  if (c == 'P0087' || c == 'P0088' || c == 'P0191' || c == 'P0190') return 'fuel_filter';
+  if (c == 'P0521' || c == 'P0522' || c == 'P0524') return 'oil';
+  return null;
+}

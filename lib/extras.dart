@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'backup.dart';
 import 'l10n.dart';
+import 'license.dart';
 import 'main.dart';
 import 'sync.dart';
 
@@ -215,6 +216,43 @@ Future<void> downloadAndInstall(BuildContext context) async {
       await launchUrl(Uri.parse(apkLink), mode: LaunchMode.externalApplication);
     }
   }
+}
+
+/// تذكير (مرة في اليوم) قبل انتهاء اشتراك OBD أو التجربة بخمسة أيام
+Future<void> licenseReminder(BuildContext context, Store store) async {
+  try {
+    final car = store.car;
+    final lic = await currentLicense(store, car.id);
+    if (lic == null || lic.daysLeft > 5) return;
+    final key = '${DateTime.now().toIso8601String().substring(0, 10)}|${car.id}';
+    if (store.prefs.getString('licRemind') == key) return;
+    await store.prefs.setString('licRemind', key);
+    if (!context.mounted) return;
+    final d = lic.daysLeft;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(lic.trial ? t('التجربة المجانية تنتهي قريباً', "L'essai gratuit se termine bientôt") : t('اشتراك OBD ينتهي قريباً', "Votre abonnement OBD expire bientôt")),
+        content: Text(d <= 0
+            ? t('ينتهي اليوم (${car.label}).', "Expire aujourd'hui (${car.label}).")
+            : t('بقي $d أيام (${car.label}).', "Il reste $d jours (${car.label}).")),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('لاحقاً', 'Plus tard'))),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              final tier = lic.tier == Tier.pro ? t('الكامل', 'Complet') : t('الأساسي', 'De base');
+              launchUrl(
+                  waUrl(t('السلام عليكم، أريد تجديد اشتراك OBD ($tier).\nمعرّف السيارة: ${car.id}\nالسيارة: ${car.label}',
+                      "Bonjour, je souhaite renouveler l'abonnement OBD ($tier).\nIdentifiant : ${car.id}\nVoiture : ${car.label}")),
+                  mode: LaunchMode.externalApplication);
+            },
+            child: Text(t('تجديد عبر واتساب', 'Renouveler (WhatsApp)')),
+          ),
+        ],
+      ),
+    );
+  } catch (_) {}
 }
 
 /// عند فتح الشاشة الرئيسية: إشعار بإصدار جديد، أو (مرة واحدة بعد أسبوعين) دعوة للمشاركة

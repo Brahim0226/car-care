@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'dtc.dart';
 import 'l10n.dart';
 import 'main.dart';
 
@@ -306,6 +307,75 @@ Future<Uint8List> buildReportPdf(Store store, ReportOptions o) async {
           ignoreMargins: true,
           child: pw.Image(img, fit: pw.BoxFit.fill),
         ),
+      ),
+    );
+  }
+  return doc.save();
+}
+
+/// تقرير فحص OBD (PDF) للسيارة
+Future<Uint8List> buildObdReportPdf({
+  required Car car,
+  required List<String> stored,
+  required List<String> pending,
+  required Map<String, String> live,
+  String? odoKm,
+  String? adapter,
+}) async {
+  final p = _Pager()..begin();
+  await p.line(t('تقرير فحص السيارة (OBD)', 'Rapport de diagnostic (OBD)'), size: 46, bold: true, color: const Color(0xFF1565C0));
+  await p.line(t('التاريخ: ${fmtDate(DateTime.now())}', 'Date : ${fmtDate(DateTime.now())}'), size: 24, color: Colors.grey, gap: 14);
+  await p.rule();
+  p.space(8);
+  await p.line(car.label, size: 36, bold: true, gap: 4);
+  await p.line(t('العداد المسجل: ${fmt(car.km)} كم', 'Compteur enregistré : ${fmt(car.km)} km'), size: 24, color: Colors.black54, gap: 4);
+  if (odoKm != null) {
+    await p.line(t('العداد من السيارة: $odoKm كم', 'Compteur lu sur la voiture : $odoKm km'), size: 24, color: Colors.black54, gap: 4);
+  }
+  if (adapter != null && adapter.isNotEmpty) {
+    await p.line(t('المحوّل: $adapter', 'Adaptateur : $adapter'), size: 22, color: Colors.black54, gap: 4);
+  }
+  p.space(10);
+
+  Future<void> section(String title, List<String> codes) async {
+    await p.line(title, size: 30, bold: true, gap: 8);
+    if (codes.isEmpty) {
+      await p.line(t('لا توجد أعطال ✔', 'Aucun défaut ✔'), size: 26, gap: 12);
+    } else {
+      for (final c in codes) {
+        await p.line('$c  —  ${dtcExplain(c)}', size: 26, gap: 8);
+      }
+      p.space(6);
+    }
+  }
+
+  await section(t('أعطال مخزّنة', 'Défauts enregistrés'), stored);
+  await section(t('أعطال قيد الرصد', 'Défauts en attente'), pending);
+
+  if (live.isNotEmpty) {
+    p.space(6);
+    await p.line(t('بيانات حية لحظة الفحص', 'Données en direct'), size: 30, bold: true, gap: 8);
+    for (final e in live.entries) {
+      await p.line('${e.key}: ${e.value}', size: 26, gap: 6);
+    }
+  }
+  p.space(12);
+  await p.rule();
+  await p.line(
+      t('تنبيه: هذا التقرير للاسترشاد، ويُنصح بتأكيد العطل عند ميكانيكي مختص.',
+          "Remarque : ce rapport est indicatif, faites confirmer le défaut par un mécanicien."),
+      size: 20,
+      color: Colors.grey);
+  await p.end();
+
+  final doc = pw.Document();
+  for (final png in p.pages) {
+    final img = pw.MemoryImage(png);
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: pw.EdgeInsets.zero,
+        build: (ctx) => pw.FullPage(ignoreMargins: true, child: pw.Image(img, fit: pw.BoxFit.fill)),
       ),
     );
   }

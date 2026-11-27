@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -11,6 +13,7 @@ import 'dtc.dart';
 import 'l10n.dart';
 import 'license.dart';
 import 'main.dart';
+import 'report.dart';
 import 'sync.dart';
 
 /// اتصال بمحوّل ELM327 عبر بلوتوث عادي (SPP) وإرسال أوامر OBD-II
@@ -232,8 +235,7 @@ class _ObdPageState extends State<ObdPage> {
     final msg = t(
         'السلام عليكم، أريد اشتراك OBD ($tier).\nمعرّف السيارة: ${car.id}\nالسيارة: ${car.label}\nالتطبيق: $appVersion',
         "Bonjour, je souhaite l'abonnement OBD ($tier).\nIdentifiant : ${car.id}\nVoiture : ${car.label}\nApp : $appVersion");
-    final ok = await launchUrl(Uri.parse('https://wa.me/213558494430?text=${Uri.encodeComponent(msg)}'),
-        mode: LaunchMode.externalApplication);
+    final ok = await launchUrl(waUrl(msg), mode: LaunchMode.externalApplication);
     if (!ok) _msg(t('تعذّر فتح واتساب', "Impossible d'ouvrir WhatsApp"));
   }
 
@@ -281,6 +283,17 @@ class _ObdPageState extends State<ObdPage> {
                     label: Text(t('طلب «كامل» (واتساب)', 'Demander « Complet »')),
                   ),
                 ]),
+                if (canStartTrial(widget.store, car.id))
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await startTrial(widget.store, car.id);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      await _loadLic();
+                      _msg(t('بدأت التجربة المجانية ($trialDays أيام، الاشتراك الأساسي) ✅', 'Essai gratuit démarré ($trialDays jours, abonnement de base) ✅'));
+                    },
+                    icon: const Icon(Icons.card_giftcard, size: 18),
+                    label: Text(t('تجربة مجانية $trialDays أيام (الأساسي)', 'Essai gratuit $trialDays jours (de base)')),
+                  ),
                 const SizedBox(height: 8),
                 Text(t('2) ألصق الكود الذي تستلمه هنا:', '2) Collez ici le code reçu :')),
                 const SizedBox(height: 6),
@@ -314,7 +327,7 @@ class _ObdPageState extends State<ObdPage> {
     final l = lic;
     if (l == null) return t('غير مفعّل', 'Non activé');
     final d = '${l.expiry.year}-${l.expiry.month.toString().padLeft(2, '0')}-${l.expiry.day.toString().padLeft(2, '0')}';
-    final name = l.tier == Tier.pro ? t('كامل', 'Complet') : t('أساسي', 'De base');
+    final name = (l.trial ? t('تجربة ', 'Essai ') : '') + (l.tier == Tier.pro ? t('كامل', 'Complet') : t('أساسي', 'De base'));
     return t('$name حتى $d', '$name jusqu\'au $d');
   }
 
@@ -399,8 +412,89 @@ class _ObdPageState extends State<ObdPage> {
         stored = s;
         pending = p;
       });
+      _logDtcs(s, p);
     } catch (e) {
       _msg(t('فشلت القراءة: $e', 'Échec de lecture : $e'));
+    }
+    if (mounted) setState(() => busy = false);
+  }
+
+  void _logDtcs(List<String> s, List<String> p) {
+    try {
+      final prefs = widget.store.prefs;
+      final all = (jsonDecode(prefs.getString('dtcLog') ?? '[]') as List).cast<Map<String, dynamic>>();
+      all.add({'car': widget.store.car.id, 'd': DateTime.now().toIso8601String().substring(0, 16), 's': s, 'p': p});
+      final keep = all.length > 80 ? all.sublist(all.length - 80) : all;
+      prefs.setString('dtcLog', jsonEncode(keep));
+    } catch (_) {}
+  }
+
+  void _history() {
+    List<Map<String, dynamic>> rows = [];
+    try {
+      rows = (jsonDecode(widget.store.prefs.getString('dtcLog') ?? '[]') as List)
+          .cast<Map<String, dynamic>>()
+          .where((e) => e['car'] == widget.store.car.id)
+          .toList()
+          .reversed
+          .toList();
+    } catch (_) {}
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Directionality(
+        textDirection: Lang.dir,
+        child: SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.75),
+            child: rows.isEmpty
+                ? Padding(padding: const EdgeInsets.all(24), child: Text(t('لا يوجد سجل بعد. يُحفظ كل فحص تلقائياً.', "Aucun historique. Chaque lecture est enregistrée automatiquement.")))
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Text(t('سجل الأعطال', 'Historique des défauts'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      for (final r in rows)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(('${r['d']}').replaceFirst('T', '  '), style: const TextStyle(fontWeight: FontWeight.bold)),
+                                if ((r['s'] as List).isEmpty && (r['p'] as List).isEmpty) Text(t('لا أعطال ✅', 'Aucun défaut ✅')),
+                                for (final c in (r['s'] as List)) Text('$c — ${dtcExplain('$c')}'),
+                                for (final c in (r['p'] as List)) Text('$c (${t('قيد الرصد', 'en attente')}) — ${dtcExplain('$c')}'),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _report() async {
+    if (!await _need(Tier.pro)) return;
+    if (stored == null) {
+      _msg(t('اقرأ الأعطال أولاً', "Lisez d'abord les défauts"));
+      return;
+    }
+    setState(() => busy = true);
+    try {
+      final bytes = await buildObdReportPdf(
+        car: widget.store.car,
+        stored: stored ?? [],
+        pending: pending ?? [],
+        live: live,
+        odoKm: odoKm,
+        adapter: adapterName,
+      );
+      await Printing.sharePdf(bytes: bytes, filename: 'obd_report.pdf');
+    } catch (e) {
+      _msg(t('تعذّر إنشاء التقرير: $e', 'Impossible de créer le rapport : $e'));
     }
     if (mounted) setState(() => busy = false);
   }
@@ -510,7 +604,25 @@ class _ObdPageState extends State<ObdPage> {
                     children: [
                       Text(c, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       const SizedBox(width: 12),
-                      Expanded(child: Text(dtcExplain(c))),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(dtcExplain(c)),
+                            if (dtcItemHint(c) != null && widget.store.car.itemById(dtcItemHint(c)!) != null)
+                              TextButton.icon(
+                                style: TextButton.styleFrom(padding: EdgeInsets.zero, alignment: AlignmentDirectional.centerStart),
+                                onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => ItemPage(store: widget.store, itemId: dtcItemHint(c)!))),
+                                icon: const Icon(Icons.build_circle_outlined, size: 18),
+                                label: Text(t('قد يتعلق بـ: ${widget.store.car.itemById(dtcItemHint(c)!)!.label}',
+                                    'Peut concerner : ${widget.store.car.itemById(dtcItemHint(c)!)!.label}')),
+                              ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -538,6 +650,20 @@ class _ObdPageState extends State<ObdPage> {
                 trailing: FilledButton.tonal(onPressed: _activateDialog, child: Text(t('تفعيل', 'Activer'))),
               ),
             ),
+            if (lic != null && lic!.daysLeft <= 5)
+              Card(
+                color: Colors.orange.shade50,
+                child: ListTile(
+                  leading: const Icon(Icons.warning_amber, color: Colors.orange),
+                  title: Text(lic!.daysLeft <= 0
+                      ? t('ينتهي اشتراكك اليوم', "Votre abonnement expire aujourd'hui")
+                      : t('ينتهي اشتراكك بعد ${lic!.daysLeft} أيام', "Votre abonnement expire dans ${lic!.daysLeft} jours")),
+                  trailing: FilledButton(
+                    onPressed: () => _whatsapp(widget.store.car, lic!.tier == Tier.pro),
+                    child: Text(t('تجديد', 'Renouveler')),
+                  ),
+                ),
+              ),
             const SizedBox(height: 8),
             Text(t(
                 'ركّب محوّل ELM327 (بلوتوث) في فتحة OBD، وشغّل الاحتراق، ثم اقرنه من إعدادات البلوتوث في الهاتف. بعدها اضغط «عرض الأجهزة» واختره. القراءة تعمل دون إنترنت.',
@@ -575,6 +701,16 @@ class _ObdPageState extends State<ObdPage> {
                     onPressed: busy ? null : _readLive,
                     icon: const Icon(Icons.speed),
                     label: Text(t('بيانات حية', 'Données en direct')),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: busy ? null : _history,
+                    icon: const Icon(Icons.history),
+                    label: Text(t('سجل الأعطال', 'Historique')),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: busy ? null : _report,
+                    icon: const Icon(Icons.picture_as_pdf),
+                    label: Text(t('تقرير PDF', 'Rapport PDF')),
                   ),
                   FilledButton.tonalIcon(
                     onPressed: busy ? null : _readOdo,

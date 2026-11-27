@@ -622,7 +622,11 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) startupPrompts(context, widget.store);
+      if (mounted) {
+        startupPrompts(context, widget.store).then((_) {
+          if (mounted) licenseReminder(context, widget.store);
+        });
+      }
     });
   }
 

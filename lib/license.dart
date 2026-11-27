@@ -16,8 +16,22 @@ final DateTime _epoch = DateTime.utc(2020, 1, 1);
 class License {
   final Tier tier;
   final DateTime expiry; // يوم الانتهاء (شامل)
-  const License(this.tier, this.expiry);
+  final bool trial;
+  const License(this.tier, this.expiry, {this.trial = false});
+
+  /// الأيام المتبقية حتى الانتهاء (0 = ينتهي اليوم)
+  int get daysLeft {
+    final n = DateTime.now().toUtc();
+    return expiry.difference(DateTime.utc(n.year, n.month, n.day)).inDays;
+  }
 }
+
+/// مدة التجربة المجانية (اشتراك أساسي) لكل سيارة، مرة واحدة. ضع 0 لإيقافها.
+const trialDays = 7;
+
+/// رقم واتساب للطلب والتجديد
+const waNumber = '213558494430';
+Uri waUrl(String msg) => Uri.parse('https://wa.me/$waNumber?text=${Uri.encodeComponent(msg)}');
 
 Uint8List _b64d(String s) {
   var x = s.replaceAll('-', '+').replaceAll('_', '/');
@@ -73,12 +87,31 @@ Future<License?> activateLicense(Store s, String carId, String code) async {
   return lic;
 }
 
+Map<String, String> _loadTrials(Store s) {
+  try {
+    final m = jsonDecode(s.prefs.getString('trials') ?? '{}') as Map<String, dynamic>;
+    return m.map((k, v) => MapEntry(k, v.toString()));
+  } catch (_) {
+    return {};
+  }
+}
+
+/// هل يمكن بدء تجربة مجانية لهذه السيارة؟ (لم تُستعمل ولم يُفعَّل لها اشتراك من قبل)
+bool canStartTrial(Store s, String carId) =>
+    trialDays > 0 && !_loadTrials(s).containsKey(carId) && !_loadAll(s).containsKey(carId);
+
+Future<License?> startTrial(Store s, String carId) async {
+  if (!canStartTrial(s, carId)) return null;
+  final now = DateTime.now().toUtc();
+  final exp = DateTime.utc(now.year, now.month, now.day).add(const Duration(days: trialDays - 1));
+  final m = _loadTrials(s);
+  m[carId] = exp.toIso8601String().substring(0, 10);
+  await s.prefs.setString('trials', jsonEncode(m));
+  return License(Tier.basic, exp, trial: true);
+}
+
 /// الاشتراك الساري لهذه السيارة الآن (أو null). يمنع الرجوع بالساعة للخلف.
 Future<License?> currentLicense(Store s, String carId) async {
-  final code = _loadAll(s)[carId];
-  if (code == null) return null;
-  final lic = await parseLicense(code, carId);
-  if (lic == null) return null;
   var now = DateTime.now().toUtc();
   final seen = s.prefs.getInt('licSeen') ?? 0;
   if (now.millisecondsSinceEpoch < seen) {
@@ -87,6 +120,19 @@ Future<License?> currentLicense(Store s, String carId) async {
     await s.prefs.setInt('licSeen', now.millisecondsSinceEpoch);
   }
   final today = DateTime.utc(now.year, now.month, now.day);
-  if (today.isAfter(lic.expiry)) return null;
-  return lic;
+
+  final code = _loadAll(s)[carId];
+  if (code != null) {
+    final lic = await parseLicense(code, carId);
+    if (lic != null && !today.isAfter(lic.expiry)) return lic;
+  }
+  final tr = _loadTrials(s)[carId];
+  if (tr != null) {
+    final d = DateTime.tryParse(tr);
+    if (d != null) {
+      final exp = DateTime.utc(d.year, d.month, d.day);
+      if (!today.isAfter(exp)) return License(Tier.basic, exp, trial: true);
+    }
+  }
+  return null;
 }
