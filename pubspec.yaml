@@ -1,7 +1,7 @@
 name: car_maintenance
 description: تطبيق لمتابعة صيانة السيارة
 publish_to: 'none'
-version: 1.9.1+22
+version: 1.9.2+23
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -27,7 +27,6 @@ dependencies:
   permission_handler: ^11.3.1
   cryptography: ^2.7.0
   open_filex: ^4.5.0
-  home_widget: ^0.7.0
   # تثبيت إصدار image متوافق مع archive 4.0.9 (إصدار image 4.11 يستعمل دالة غير موجودة فيه)
   image: '>=4.5.0 <4.6.0'
 

@@ -291,7 +291,7 @@ def copy_icons(root):
 if __name__ == "__main__":
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     patch_gradle(os.path.join(root, "android", "app"))
-    wpkg = copy_widget(root)
+    wpkg = None  # الودجت معطّل مؤقتاً (يُشتبه بتعطّل التطبيق عند الفتح)
     patch_manifest(
         os.path.join(root, "android", "app", "src", "main", "AndroidManifest.xml"), wpkg
     )
