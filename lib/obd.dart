@@ -333,6 +333,7 @@ class _ObdPageState extends State<ObdPage> {
 
   @override
   void dispose() {
+    _liveOn = false;
     elm.close();
     super.dispose();
   }
@@ -403,6 +404,7 @@ class _ObdPageState extends State<ObdPage> {
 
   Future<void> _readDtcs() async {
     if (!await _need(Tier.basic)) return;
+    await _stopLive();
     setState(() => busy = true);
     try {
       final s = await elm.storedDtcs();
@@ -514,6 +516,7 @@ class _ObdPageState extends State<ObdPage> {
       ),
     );
     if (ok != true) return;
+    await _stopLive();
     setState(() => busy = true);
     try {
       final done = await elm.clearDtcs();
@@ -525,66 +528,104 @@ class _ObdPageState extends State<ObdPage> {
     if (mounted) setState(() => busy = false);
   }
 
+  bool _liveOn = false;
+  bool _liveBusy = false;
+
+  Future<void> _stopLive() async {
+    _liveOn = false;
+    var n = 0;
+    while (_liveBusy && n++ < 100) {
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
+  String _battNote(double? volts, double? rpmV) {
+    if (volts == null) return '';
+    final running = rpmV != null && rpmV > 400;
+    if (running) {
+      return volts < 13.0
+          ? t(' ⚠️ الشحن ضعيف', ' ⚠️ charge faible')
+          : volts > 14.9
+              ? t(' ⚠️ مرتفع', ' ⚠️ élevée')
+              : t(' ✅ الشحن سليم', ' ✅ charge OK');
+    }
+    return volts < 11.8
+        ? t(' ⚠️ البطارية ضعيفة جداً', ' ⚠️ batterie très faible')
+        : volts < 12.4
+            ? t(' ⚠️ ضعيفة', ' ⚠️ faible')
+            : t(' ✅ جيدة', ' ✅ bonne');
+  }
+
+  /// قراءة مباشرة متواصلة: تبدأ بضغطة وتتحدّث وحدها حتى الإيقاف
   Future<void> _readLive() async {
+    if (_liveOn) {
+      await _stopLive();
+      if (mounted) setState(() {});
+      return;
+    }
     if (!await _need(Tier.pro)) return;
-    setState(() => busy = true);
-    final m = <String, String>{};
+    _liveOn = true;
+    _liveBusy = true;
+    if (mounted) setState(() => status = '');
+    var cycle = 0;
+    double? rpmV;
     try {
-      final rpm = await elm.pid('0C');
-      if (rpm != null && rpm.length >= 2) m[t('دوران المحرك', 'Régime')] = '${((rpm[0] * 256 + rpm[1]) / 4).round()} rpm';
-      final temp = await elm.pid('05');
-      if (temp != null && temp.isNotEmpty) m[t('حرارة سائل التبريد', 'Liquide de refroidissement')] = '${temp[0] - 40} °C';
-      final sp = await elm.pid('0D');
-      if (sp != null && sp.isNotEmpty) m[t('السرعة', 'Vitesse')] = '${sp[0]} km/h';
-      final load = await elm.pid('04');
-      if (load != null && load.isNotEmpty) m[t('حِمل المحرك', 'Charge moteur')] = '${(load[0] * 100 / 255).round()} %';
-      final iat = await elm.pid('0F');
-      if (iat != null && iat.isNotEmpty) m[t('حرارة هواء السحب', "Température d'air admission")] = '${iat[0] - 40} °C';
-      final thr = await elm.pid('11');
-      if (thr != null && thr.isNotEmpty) m[t('فتحة الخانق', 'Papillon')] = '${(thr[0] * 100 / 255).round()} %';
-      final stft = await elm.pid('06');
-      if (stft != null && stft.isNotEmpty) m[t('تصحيح الوقود القصير', 'Correction carburant (court terme)')] = '${((stft[0] - 128) * 100 / 128).toStringAsFixed(1)} %';
-      final mil = await elm.pid('01');
-      if (mil != null && mil.isNotEmpty) {
-        final on = (mil[0] & 0x80) != 0;
-        final n = mil[0] & 0x7F;
-        m[t('مصباح العطل', 'Voyant moteur')] = on ? t('مضاء ($n أعطال)', 'Allumé ($n défauts)') : t('مطفأ', 'Éteint');
-      }
-      final v = await elm.cmd('ATRV');
-      if (v.isNotEmpty) {
-        final volts = double.tryParse(RegExp(r'[\d.]+').firstMatch(v.last)?.group(0) ?? '');
-        var note = '';
-        if (volts != null) {
-          final running = rpm != null && rpm.length >= 2 && (rpm[0] * 256 + rpm[1]) / 4 > 400;
-          if (running) {
-            note = volts < 13.0
-                ? t(' ⚠️ الشحن ضعيف', ' ⚠️ charge faible')
-                : volts > 14.9
-                    ? t(' ⚠️ مرتفع', ' ⚠️ élevée')
-                    : t(' ✅ الشحن سليم', ' ✅ charge OK');
-          } else {
-            note = volts < 11.8
-                ? t(' ⚠️ البطارية ضعيفة جداً', ' ⚠️ batterie très faible')
-                : volts < 12.4
-                    ? t(' ⚠️ ضعيفة', ' ⚠️ faible')
-                    : t(' ✅ جيدة', ' ✅ bonne');
+      while (_liveOn && mounted && elm.connected) {
+        final m = Map<String, String>.from(live);
+        final rpm = await elm.pid('0C');
+        if (rpm != null && rpm.length >= 2) {
+          rpmV = (rpm[0] * 256 + rpm[1]) / 4;
+          m[t('دوران المحرك', 'Régime')] = '${rpmV.round()} rpm';
+        }
+        if (!_liveOn) break;
+        final sp = await elm.pid('0D');
+        if (sp != null && sp.isNotEmpty) m[t('السرعة', 'Vitesse')] = '${sp[0]} km/h';
+        final thr = await elm.pid('11');
+        if (thr != null && thr.isNotEmpty) m[t('فتحة الخانق', 'Papillon')] = '${(thr[0] * 100 / 255).round()} %';
+        final load = await elm.pid('04');
+        if (load != null && load.isNotEmpty) m[t('حِمل المحرك', 'Charge moteur')] = '${(load[0] * 100 / 255).round()} %';
+        // القيم البطيئة التغيّر: كل 5 دورات
+        if (cycle % 5 == 0 && _liveOn) {
+          final temp = await elm.pid('05');
+          if (temp != null && temp.isNotEmpty) m[t('حرارة سائل التبريد', 'Liquide de refroidissement')] = '${temp[0] - 40} °C';
+          final iat = await elm.pid('0F');
+          if (iat != null && iat.isNotEmpty) m[t('حرارة هواء السحب', "Température d'air admission")] = '${iat[0] - 40} °C';
+          final stft = await elm.pid('06');
+          if (stft != null && stft.isNotEmpty) {
+            m[t('تصحيح الوقود القصير', 'Correction carburant (court terme)')] = '${((stft[0] - 128) * 100 / 128).toStringAsFixed(1)} %';
+          }
+          final mil = await elm.pid('01');
+          if (mil != null && mil.isNotEmpty) {
+            final on = (mil[0] & 0x80) != 0;
+            final n = mil[0] & 0x7F;
+            m[t('مصباح العطل', 'Voyant moteur')] = on ? t('مضاء ($n أعطال)', 'Allumé ($n défauts)') : t('مطفأ', 'Éteint');
+          }
+          final v = await elm.cmd('ATRV');
+          if (v.isNotEmpty) {
+            final volts = double.tryParse(RegExp(r'[\d.]+').firstMatch(v.last)?.group(0) ?? '');
+            m[t('جهد البطارية', 'Tension batterie')] = '${v.last}${_battNote(volts, rpmV)}';
           }
         }
-        m[t('جهد البطارية', 'Tension batterie')] = '${v.last}$note';
+        cycle++;
+        if (!mounted) break;
+        setState(() {
+          live = m;
+          if (m.isEmpty) status = t('لم تُرجع السيارة أي بيانات حية', "La voiture n'a renvoyé aucune donnée");
+        });
+        if (m.isEmpty) break;
+        await Future.delayed(const Duration(milliseconds: 150));
       }
     } catch (e) {
       _msg('$e');
     }
-    if (!mounted) return;
-    setState(() {
-      live = m;
-      busy = false;
-      if (m.isEmpty) status = t('لم تُرجع السيارة أي بيانات حية', "La voiture n'a renvoyé aucune donnée");
-    });
+    _liveOn = false;
+    _liveBusy = false;
+    if (mounted) setState(() {});
   }
 
   Future<void> _readOdo() async {
     if (!await _need(Tier.pro)) return;
+    await _stopLive();
     setState(() => busy = true);
     try {
       final d = await elm.pid('A6');
@@ -731,8 +772,8 @@ class _ObdPageState extends State<ObdPage> {
                   ),
                   FilledButton.tonalIcon(
                     onPressed: busy ? null : _readLive,
-                    icon: const Icon(Icons.speed),
-                    label: Text(t('بيانات حية', 'Données en direct')),
+                    icon: Icon(_liveOn ? Icons.stop_circle_outlined : Icons.speed),
+                    label: Text(_liveOn ? t('إيقاف البيانات الحية', 'Arrêter le direct') : t('بيانات حية', 'Données en direct')),
                   ),
                   FilledButton.tonalIcon(
                     onPressed: busy ? null : _history,
