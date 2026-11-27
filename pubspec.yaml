@@ -1,7 +1,7 @@
 name: car_maintenance
 description: تطبيق لمتابعة صيانة السيارة
 publish_to: 'none'
-version: 1.7.3+16
+version: 1.7.4+17
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -26,6 +26,7 @@ dependencies:
   flutter_classic_bluetooth: ^1.7.3
   permission_handler: ^11.3.1
   cryptography: ^2.7.0
+  open_filex: ^4.5.0
   # تثبيت إصدار image متوافق مع archive 4.0.9 (إصدار image 4.11 يستعمل دالة غير موجودة فيه)
   image: '>=4.5.0 <4.6.0'
 

@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -149,6 +151,72 @@ void showPhoto(BuildContext context, String path) {
 
 const apkLink = 'https://github.com/Brahim0226/car-care/releases/latest/download/car-care.apk';
 
+/// ينزّل الـAPK داخل التطبيق ثم يفتح شاشة التثبيت مباشرة (مع احتياط: فتح رابط التحميل)
+Future<void> downloadAndInstall(BuildContext context) async {
+  final progress = ValueNotifier<double?>(0);
+  var cancelled = false;
+  var dialogOpen = true;
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      title: Text(t('جارٍ تنزيل التحديث', 'Téléchargement de la mise à jour')),
+      content: ValueListenableBuilder<double?>(
+        valueListenable: progress,
+        builder: (_, v, __) => Column(mainAxisSize: MainAxisSize.min, children: [
+          LinearProgressIndicator(value: v),
+          const SizedBox(height: 8),
+          Text(v == null ? '…' : '${(v * 100).round()}%'),
+        ]),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            cancelled = true;
+            dialogOpen = false;
+            Navigator.pop(ctx);
+          },
+          child: Text(t('إلغاء', 'Annuler')),
+        ),
+      ],
+    ),
+  );
+  try {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/car-care-update.apk');
+    final client = http.Client();
+    try {
+      final resp = await client.send(http.Request('GET', Uri.parse(apkLink)));
+      if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
+      final total = resp.contentLength ?? 0;
+      var got = 0;
+      final sink = file.openWrite();
+      await for (final chunk in resp.stream) {
+        if (cancelled) break;
+        sink.add(chunk);
+        got += chunk.length;
+        progress.value = total > 0 ? got / total : null;
+      }
+      await sink.close();
+      if (cancelled) return;
+    } finally {
+      client.close();
+    }
+    if (dialogOpen && context.mounted) Navigator.of(context, rootNavigator: true).pop();
+    dialogOpen = false;
+    final r = await OpenFilex.open(file.path, type: 'application/vnd.android.package-archive');
+    if (r.type != ResultType.done) throw Exception(r.message);
+  } catch (_) {
+    if (dialogOpen && context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      dialogOpen = false;
+    }
+    if (!cancelled) {
+      await launchUrl(Uri.parse(apkLink), mode: LaunchMode.externalApplication);
+    }
+  }
+}
+
 /// عند فتح الشاشة الرئيسية: إشعار بإصدار جديد، أو (مرة واحدة بعد أسبوعين) دعوة للمشاركة
 Future<void> startupPrompts(BuildContext context, Store store) async {
   try {
@@ -189,7 +257,7 @@ Future<void> startupPrompts(BuildContext context, Store store) async {
               FilledButton(
                 onPressed: () {
                   Navigator.pop(ctx);
-                  launchUrl(Uri.parse(apkLink), mode: LaunchMode.externalApplication);
+                  downloadAndInstall(context);
                 },
                 child: Text(t('تحميل', "Télécharger")),
               ),
@@ -205,7 +273,7 @@ Future<void> startupPrompts(BuildContext context, Store store) async {
         leading: const Icon(Icons.system_update),
         actions: [
           TextButton(
-            onPressed: () => launchUrl(Uri.parse(apkLink), mode: LaunchMode.externalApplication),
+            onPressed: () => downloadAndInstall(context),
             child: Text(t('تحميل', 'Télécharger')),
           ),
           TextButton(onPressed: sm.hideCurrentMaterialBanner, child: Text(t('إخفاء', 'Masquer'))),
