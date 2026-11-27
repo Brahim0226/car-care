@@ -59,7 +59,8 @@ textarea{height:110px}#code{direction:ltr;font-family:monospace;font-size:.8rem}
 <div class="card" id="out" hidden>
 <b id="info"></b>
 <textarea id="code" readonly></textarea>
-<div class="row"><button class="sec" id="copy">نسخ الكود</button><button class="wa" id="wa">إرسال عبر واتساب</button></div>
+<div class="row"><button class="sec" id="copy">نسخ الكود</button><button class="wa" id="wa">إرسال للزبون</button></div>
+<small>إن كتبت رقم الزبون أعلاه يُفتح محادثته مباشرة، وإلا تفتح قائمة المشاركة لتختار واتساب ثم الزبون.</small>
 </div>
 <div class="card"><b>المشتركون</b> <small>(في هذا الهاتف فقط)</small>
 <ul id="subs"></ul>
@@ -183,15 +184,28 @@ $('go').onclick=async()=>{
   $('info').textContent=(tier==2?'كامل':'أساسي')+' حتى '+ds+' | سيارة '+car;
   $('code').value=code;$('out').hidden=false;
   const a=rd().filter(x=>x.car!==car);
-  a.push({car,tier,exp:ds,note:$('note').value.trim(),phone:$('phone').value.trim()});
+  a.push({car,tier,exp:ds,note:$('note').value.trim(),phone:normPhone($('phone').value)||(prev&&prev.phone)||''});
   wr(a);showSubs();
 };
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('code').value);$('copy').textContent='تم النسخ ✓'}catch(e){$('code').select()}};
+function normPhone(v){
+  let d=(v||'').replace(/\D/g,'');
+  if(d.startsWith('00'))d=d.slice(2);
+  if(d.startsWith('0')&&d.length===10)d='213'+d.slice(1);
+  return d;
+}
 $('wa').onclick=()=>{
   const until=$('info').textContent.split('حتى ')[1].split(' |')[0];
   const txt='كود تفعيل اشتراك OBD (حتى '+until+'):\n'+$('code').value+'\n\nألصقه في: فحص OBD ← تفعيل ← خانة الكود.\nCode d\'activation OBD :\n'+$('code').value;
-  const ph=$('phone').value.replace(/\D/g,'');
-  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(txt),'_blank');
+  const ph=normPhone($('phone').value);
+  if(ph.length>=11){
+    window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(txt),'_blank');
+  }else if(navigator.share){
+    // بلا رقم: تفتح قائمة المشاركة فتختار واتساب ثم الزبون
+    navigator.share({text:txt}).catch(()=>{});
+  }else{
+    window.open('whatsapp://send?text='+encodeURIComponent(txt),'_blank');
+  }
 };
 $('exp').onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(rd()));$('exp').textContent='تم النسخ ✓'}catch(e){}};
 $('imp').onclick=()=>{const t=prompt('ألصق قائمة المشتركين (JSON)');if(!t)return;try{const a=JSON.parse(t);if(Array.isArray(a)){wr(a);showSubs()}}catch(e){alert('نص غير صالح')}};
