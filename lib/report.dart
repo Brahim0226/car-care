@@ -321,6 +321,7 @@ Future<Uint8List> buildObdReportPdf({
   required Map<String, String> live,
   String? odoKm,
   String? adapter,
+  List<String> readiness = const [],
 }) async {
   final p = _Pager()..begin();
   await p.line(t('تقرير فحص السيارة (OBD)', 'Rapport de diagnostic (OBD)'), size: 46, bold: true, color: const Color(0xFF1565C0));
@@ -352,6 +353,13 @@ Future<Uint8List> buildObdReportPdf({
   await section(t('أعطال مخزّنة', 'Défauts enregistrés'), stored);
   await section(t('أعطال قيد الرصد', 'Défauts en attente'), pending);
 
+  if (readiness.isNotEmpty) {
+    p.space(6);
+    await p.line(t('جاهزية المراقبة التقنية', 'Prêt pour le contrôle technique'), size: 30, bold: true, gap: 8);
+    for (final l in readiness) {
+      await p.line(l, size: 24, gap: 6);
+    }
+  }
   if (live.isNotEmpty) {
     p.space(6);
     await p.line(t('بيانات حية لحظة الفحص', 'Données en direct'), size: 30, bold: true, gap: 8);

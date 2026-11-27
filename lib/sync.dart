@@ -12,7 +12,7 @@ import 'main.dart';
 /// والأحدث (حسب modifiedAt) هو الذي يفوز.
 late Cloud cloud;
 
-const appVersion = '1.8.2';
+const appVersion = '1.9.0';
 
 /// نتيجة آخر فحص للتحديث (للتشخيص في «حول التطبيق»)
 String updateDiag = '';
@@ -105,6 +105,30 @@ Future<void> pingInstall(Store store) async {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       await prefs.setString('lastPing', today);
     }
+  } catch (_) {}
+}
+
+final Set<String> _reported = {};
+
+/// بلاغ خطأ مجهول (نص الخطأ والإصدار فقط، بلا أي بيانات شخصية). حدّ أقصى 5 في الجلسة.
+Future<void> reportError(Object error, StackTrace? stack) async {
+  try {
+    final msg = error.toString().split('\n').first;
+    if (_reported.length >= 5 || !_reported.add(msg)) return;
+    final prefs = cloud.store.prefs;
+    final id = prefs.getString('installId');
+    if (id == null) return;
+    await http
+        .post(Uri.parse('${Cloud._url}/rest/v1/rpc/log_error'),
+            headers: {'apikey': Cloud._key, 'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'p_id': id,
+              'p_version': appVersion,
+              'p_lang': Lang.code,
+              'p_msg': msg,
+              'p_stack': stack?.toString().split('\n').take(8).join('\n') ?? '',
+            }))
+        .timeout(const Duration(seconds: 10));
   } catch (_) {}
 }
 

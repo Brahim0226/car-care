@@ -17,6 +17,52 @@ import 'report.dart';
 import 'sync.dart';
 
 /// اتصال بمحوّل ELM327 عبر بلوتوث عادي (SPP) وإرسال أوامر OBD-II
+/// نتيجة فحص جاهزية المراقبات (Readiness): الاسم + هل اكتمل
+class Mon {
+  final String name;
+  final bool ready;
+  const Mon(this.name, this.ready);
+}
+
+/// يفكّ ردّ PID 01 (أربعة بايتات). يرجع null إن لم يكن صالحاً.
+({bool mil, int count, List<Mon> mons})? decodeReadiness(List<int> d) {
+  if (d.length < 4) return null;
+  final a = d[0], b = d[1], c = d[2], dd = d[3];
+  final mons = <Mon>[];
+  // المراقبات المستمرة: bits 0..2 مدعومة، bits 4..6 غير مكتملة
+  if (b & 0x01 != 0) mons.add(Mon(t('الاحتراق الخاطئ', 'Ratés d\'allumage'), b & 0x10 == 0));
+  if (b & 0x02 != 0) mons.add(Mon(t('منظومة الوقود', 'Système carburant'), b & 0x20 == 0));
+  if (b & 0x04 != 0) mons.add(Mon(t('المكوّنات الشاملة', 'Composants'), b & 0x40 == 0));
+  final diesel = b & 0x08 != 0;
+  final names = diesel
+      ? [
+          t('محفز NMHC', 'Catalyseur NMHC'),
+          t('معالجة NOx/SCR', 'Post-traitement NOx/SCR'),
+          null,
+          t('ضغط الشحن (توربو)', 'Pression de suralimentation'),
+          null,
+          t('حساس العادم', 'Sonde échappement'),
+          t('فلتر الجسيمات DPF', 'Filtre à particules'),
+          t('EGR / VVT', 'EGR / VVT'),
+        ]
+      : [
+          t('المحفّز', 'Catalyseur'),
+          t('المحفّز المسخّن', 'Catalyseur chauffé'),
+          t('نظام التبخر EVAP', 'Système EVAP'),
+          t('الهواء الثانوي', 'Air secondaire'),
+          t('مكيّف الهواء', 'Climatisation'),
+          t('حساس الأكسجين', 'Sonde O2'),
+          t('مسخّن حساس الأكسجين', 'Chauffage sonde O2'),
+          t('EGR / VVT', 'EGR / VVT'),
+        ];
+  for (var i = 0; i < 8; i++) {
+    final n = names[i];
+    if (n == null) continue;
+    if (c & (1 << i) != 0) mons.add(Mon(n, dd & (1 << i) == 0));
+  }
+  return (mil: a & 0x80 != 0, count: a & 0x7F, mons: mons);
+}
+
 class Elm {
   final dynamic _bt = FlutterClassicBluetooth();
   dynamic _conn;
@@ -182,6 +228,7 @@ class _ObdPageState extends State<ObdPage> {
   String elmVersion = '';
   String protocol = '';
   String? odoKm;
+  List<String>? readiness;
   bool busy = false;
   bool ready = false;
   List<String>? stored;
@@ -493,6 +540,7 @@ class _ObdPageState extends State<ObdPage> {
         live: live,
         odoKm: odoKm,
         adapter: adapterName,
+        readiness: readiness ?? const [],
       );
       await Printing.sharePdf(bytes: bytes, filename: 'obd_report.pdf');
     } catch (e) {
@@ -621,6 +669,32 @@ class _ObdPageState extends State<ObdPage> {
     _liveOn = false;
     _liveBusy = false;
     if (mounted) setState(() {});
+  }
+
+  Future<void> _readReadiness() async {
+    if (!await _need(Tier.pro)) return;
+    await _stopLive();
+    setState(() => busy = true);
+    try {
+      final d = await elm.pid('01');
+      final r = d == null ? null : decodeReadiness(d);
+      if (r == null) {
+        _msg(t('لم تُرجع السيارة حالة المراقبات', "La voiture n'a pas renvoyé l'état des moniteurs"));
+      } else {
+        final lines = <String>[
+          t('مصباح العطل: ${r.mil ? 'مضاء ⚠️' : 'مطفأ ✅'}', 'Voyant moteur : ${r.mil ? 'allumé ⚠️' : 'éteint ✅'}'),
+          for (final m in r.mons) '${m.ready ? '✅' : '⏳'} ${m.name}: ${m.ready ? t('مكتمل', 'prêt') : t('غير مكتمل', 'non prêt')}',
+        ];
+        final all = !r.mil && r.mons.every((m) => m.ready);
+        lines.add(all
+            ? t('النتيجة: السيارة جاهزة غالباً للمراقبة التقنية ✅', 'Résultat : voiture probablement prête pour le contrôle ✅')
+            : t('النتيجة: غير جاهزة بعد. قد تحتاج قيادة عدة أيام أو إصلاح الأعطال ⚠️', "Résultat : pas encore prête. Roulez quelques jours ou corrigez les défauts ⚠️"));
+        setState(() => readiness = lines);
+      }
+    } catch (e) {
+      _msg('$e');
+    }
+    if (mounted) setState(() => busy = false);
   }
 
   Future<void> _readOdo() async {
@@ -786,6 +860,11 @@ class _ObdPageState extends State<ObdPage> {
                     label: Text(t('تقرير PDF', 'Rapport PDF')),
                   ),
                   FilledButton.tonalIcon(
+                    onPressed: busy ? null : _readReadiness,
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: Text(t('جاهزية المراقبة التقنية', 'Prêt pour le contrôle')),
+                  ),
+                  FilledButton.tonalIcon(
                     onPressed: busy ? null : _readOdo,
                     icon: const Icon(Icons.pin),
                     label: Text(t('جلب العداد', 'Lire le compteur')),
@@ -801,6 +880,21 @@ class _ObdPageState extends State<ObdPage> {
                     onPressed: busy ? null : _clear,
                     icon: const Icon(Icons.delete_sweep),
                     label: Text(t('مسح الأعطال', 'Effacer les défauts')),
+                  ),
+                ),
+              if (readiness != null)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(t('جاهزية المراقبة التقنية', 'Prêt pour le contrôle technique'),
+                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        for (final l in readiness!) Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Text(l)),
+                      ],
+                    ),
                   ),
                 ),
               if (live.isNotEmpty)

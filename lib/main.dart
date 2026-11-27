@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'charts.dart';
 import 'docs.dart';
+import 'expenses.dart';
 import 'admin.dart';
 import 'backup.dart';
 import 'extras.dart';
@@ -229,6 +231,7 @@ class Car {
   List<Service> services;
   List<FuelEntry> fuel;
   List<CarDoc> docs;
+  List<Expense> expenses;
 
   Car({
     required this.id,
@@ -239,10 +242,12 @@ class Car {
     List<Service>? services,
     List<FuelEntry>? fuel,
     List<CarDoc>? docs,
+    List<Expense>? expenses,
   })  : items = items ?? defaultItems(),
         services = services ?? [],
         fuel = fuel ?? [],
-        docs = docs ?? [];
+        docs = docs ?? [],
+        expenses = expenses ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -253,6 +258,7 @@ class Car {
         'services': services.map((e) => e.toJson()).toList(),
         'fuel': fuel.map((e) => e.toJson()).toList(),
         'docs': docs.map((e) => e.toJson()).toList(),
+        'expenses': expenses.map((e) => e.toJson()).toList(),
       };
 
   factory Car.fromJson(Map<String, dynamic> j) => Car(
@@ -271,6 +277,9 @@ class Car {
             .toList(),
         docs: ((j['docs'] as List?) ?? [])
             .map((e) => CarDoc.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        expenses: ((j['expenses'] as List?) ?? [])
+            .map((e) => Expense.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 
@@ -547,6 +556,16 @@ class Store extends ChangeNotifier {
     _save();
   }
 
+  void addExpense(Expense e) {
+    car.expenses.add(e);
+    _save();
+  }
+
+  void deleteExpense(Expense e) {
+    car.expenses.remove(e);
+    _save();
+  }
+
   void deleteFuel(FuelEntry e) {
     car.fuel.remove(e);
     _save();
@@ -559,6 +578,15 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final store = await Store.load();
   cloud = Cloud(store);
+  final oldOnError = FlutterError.onError;
+  FlutterError.onError = (d) {
+    oldOnError?.call(d);
+    reportError(d.exception, d.stack);
+  };
+  PlatformDispatcher.instance.onError = (e, st) {
+    reportError(e, st);
+    return true;
+  };
   runApp(CarApp(store: store));
   if (cloud.loggedIn) cloud.syncNow();
   pingInstall(store);
@@ -648,6 +676,12 @@ class _HomePageState extends State<HomePage> {
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => FuelPage(store: store)),
+        );
+        break;
+      case 'expenses':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ExpensesPage(store: store)),
         );
         break;
       case 'docs':
@@ -825,6 +859,7 @@ class _HomePageState extends State<HomePage> {
                   PopupMenuItem(value: 'obd', child: Text(t('فحص السيارة (OBD)', "Diagnostic (OBD)"))),
                   PopupMenuItem(value: 'charts', child: Text(t('رسوم بيانية', "Graphiques"))),
                   PopupMenuItem(value: 'fuel', child: Text(t('سجل الوقود', "Carburant"))),
+                  PopupMenuItem(value: 'expenses', child: Text(t('مصاريف أخرى', "Autres dépenses"))),
                   PopupMenuItem(value: 'nearby', child: Text(t('ورشة / محطة قريبة', "Garage / station proche"))),
                   PopupMenuItem(value: 'cloud', child: Text(t('حسابي والمزامنة', "Mon compte et synchro"))),
                   PopupMenuItem(
